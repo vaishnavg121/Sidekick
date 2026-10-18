@@ -1,5 +1,7 @@
 # Milestone 1 verification
 
+Historical results for `a762b0a` are preserved below. See [Milestone 1.1](milestone-1.1.md) for the current hybrid-panel behavior and verification. Pinned-overlay and hidden-strip expectations below were superseded in 1.1.
+
 Executed on Windows on 18 October 2026 with Node 24.19.0, pnpm 11.20.0, WXT 0.21.4 and Playwright 1.64.1 / Chrome for Testing 156.0.8078.4.
 
 ## Automated results

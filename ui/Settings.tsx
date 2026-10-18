@@ -23,15 +23,16 @@ export function Settings({
       >
         <option value="hidden">Hidden</option>
         <option value="hover">Hover overlay</option>
-        <option value="pinned">Pinned overlay</option>
+        <option value="pinned">Pinned · Chrome side panel</option>
       </select>
       <p className="field-note">
-        Pinned keeps the overlay visible over your page. Hidden can be restored
-        from the native side panel.
+        Pinned uses Chrome’s own space alongside the page. Drag Chrome’s panel
+        divider to resize it. Hidden keeps a small edge button for reopening
+        Sidekick.
       </p>
       {(
         [
-          ['width', 'Width', 240, 440, 'px'],
+          ['width', 'Overlay width', 240, 440, 'px'],
           ['openDelay', 'Hover open delay', 0, 1500, 'ms'],
           ['closeDelay', 'Hover close delay', 100, 2000, 'ms'],
         ] as const

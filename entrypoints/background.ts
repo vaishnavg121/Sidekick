@@ -7,6 +7,8 @@ import {
   type ServerEvent,
 } from '../lib/protocol';
 import { toTabItem, type TabItem } from '../lib/tabs';
+import { WindowStateRepository } from '../lib/window-state';
+import { PanelService } from '../lib/panel-service';
 
 export default defineBackground(() => {
   const repository = new MetadataRepository(chrome.storage.local);
@@ -14,6 +16,27 @@ export default defineBackground(() => {
     accessLevel: 'TRUSTED_CONTEXTS',
   });
   const clients = new Map<chrome.runtime.Port, number>();
+  const windows = new WindowStateRepository(chrome.storage.session);
+  const panels = new PanelService(
+    {
+      open: (options) => chrome.sidePanel.open(options),
+      close:
+        typeof chrome.sidePanel.close === 'function'
+          ? (options) => chrome.sidePanel.close(options)
+          : undefined,
+    },
+    repository,
+    windows,
+    () => {
+      void refresh();
+    },
+  );
+  const report = (error: unknown) =>
+    console.error('Sidekick panel state failed', error);
+  const panelClients = new Map<
+    chrome.runtime.Port,
+    { windowId: number; documentId: string }
+  >();
   let refreshing = false;
   let dirty = false;
   const send = (port: chrome.runtime.Port, event: ServerEvent) => {
@@ -43,8 +66,15 @@ export default defineBackground(() => {
               const tabs = (await chrome.tabs.query({ windowId }))
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
+              const windowState = await windows.get(windowId);
               if (clients.has(port))
-                send(port, { type: 'snapshot', tabs, metadata, windowId });
+                send(port, {
+                  type: 'snapshot',
+                  tabs,
+                  metadata,
+                  windowId,
+                  windowState,
+                });
             } catch {
               send(port, {
                 type: 'error',
@@ -71,6 +101,27 @@ export default defineBackground(() => {
       return;
     port.onDisconnect.addListener(() => {
       clients.delete(port);
+      const panel = panelClients.get(port);
+      panelClients.delete(port);
+      if (panel) {
+        // Also supports Chrome 116–141, which has no onClosed event. A worker
+        // disconnect alone is not proof of panel closure: inspect live contexts.
+        void chrome.runtime
+          .getContexts({
+            contextTypes: ['SIDE_PANEL' as chrome.runtime.ContextType],
+            documentIds: [panel.documentId],
+          })
+          .then((contexts) => {
+            if (
+              !contexts.length &&
+              ![...panelClients.values()].some(
+                (client) => client.windowId === panel.windowId,
+              )
+            )
+              return panels.closed(panel.windowId);
+          })
+          .catch(report);
+      }
     });
     port.onMessage.addListener((message: unknown) => {
       if (
@@ -85,6 +136,44 @@ export default defineBackground(() => {
         ('windowId' in message ? message.windowId : undefined);
       if (typeof id !== 'number' || !Number.isInteger(id) || id < 0) return;
       clients.set(port, id);
+      const documentId = port.sender?.documentId;
+      if (
+        documentId &&
+        port.sender?.url === chrome.runtime.getURL('sidepanel.html')
+      ) {
+        // A sidepanel.html preview opened as a normal tab is not an open panel.
+        // Chrome reports -1 for native panel context windowId, so associate its
+        // verified document with the window supplied by the panel itself.
+        void chrome.runtime
+          .getContexts({
+            documentIds: [documentId],
+            contextTypes: ['SIDE_PANEL' as chrome.runtime.ContextType],
+          })
+          .then((contexts) => {
+            if (contexts.length && clients.has(port)) {
+              panelClients.set(port, { windowId: id, documentId });
+              return panels.connected(id, documentId);
+            }
+          })
+          .catch(report);
+      }
+      // On older Chrome, a panel can close while the worker is asleep. Reconcile
+      // its session handle on reconnect instead of relying on a missed event.
+      void windows
+        .get(id)
+        .then(async (state) => {
+          if (!state.nativePanelOpen || !state.nativeDocumentId) return;
+          const active = await chrome.runtime.getContexts({
+            documentIds: [state.nativeDocumentId],
+            contextTypes: ['SIDE_PANEL' as chrome.runtime.ContextType],
+          });
+          if (
+            !active.length &&
+            ![...panelClients.values()].some((client) => client.windowId === id)
+          )
+            await panels.closed(id);
+        })
+        .catch(report);
       void refresh();
     });
   });
@@ -102,6 +191,50 @@ export default defineBackground(() => {
       if (!isCommand(request.command)) {
         respond({ ok: false, error: 'Invalid Sidekick request.' });
         return;
+      }
+      const command = request.command;
+      const pinRequested =
+        command.type === 'panel.pin' ||
+        (command.type === 'preferences.update' &&
+          command.patch.mode === 'pinned');
+      if (pinRequested) {
+        const windowId = sender.tab?.windowId ?? request.windowId;
+        if (
+          typeof windowId !== 'number' ||
+          !Number.isInteger(windowId) ||
+          windowId < 0
+        ) {
+          respond({ ok: false, error: 'Browser window is unavailable.' });
+          return;
+        }
+        try {
+          // Keep this call before ALL asynchronous work to retain the gesture.
+          void panels
+            .pin(windowId)
+            .then(async () => {
+              if (command.type === 'preferences.update') {
+                const patch = { ...command.patch };
+                delete patch.mode;
+                if (Object.keys(patch).length)
+                  await repository.updatePreferences(patch);
+              }
+              respond({ ok: true });
+            })
+            .catch(() =>
+              respond({
+                ok: false,
+                error:
+                  'Chrome could not finish pinning Sidekick. Click Pin or the toolbar icon to try again.',
+              }),
+            );
+        } catch {
+          respond({
+            ok: false,
+            error:
+              'Chrome could not open the side panel. Use the Sidekick toolbar icon.',
+          });
+        }
+        return true;
       }
       void (async () => {
         try {
@@ -131,7 +264,22 @@ export default defineBackground(() => {
               await chrome.tabs.create({ windowId });
               break;
             case 'preferences.update':
-              await repository.updatePreferences(c.patch);
+              if (c.patch.mode && c.patch.mode !== 'pinned')
+                await panels.setMode(windowId, c.patch.mode);
+              {
+                const patch = { ...c.patch };
+                delete patch.mode;
+                if (Object.keys(patch).length)
+                  await repository.updatePreferences(patch);
+              }
+              break;
+            case 'sidebar.mode':
+              await panels.setMode(windowId, c.mode);
+              break;
+            case 'search.update':
+              await windows.update(windowId, { query: c.query });
+              break;
+            case 'panel.pin':
               break;
             case 'workspace.select':
               await repository.selectWorkspace(c.id);
@@ -139,11 +287,13 @@ export default defineBackground(() => {
           }
           respond({ ok: true });
           void refresh();
-        } catch {
+        } catch (error) {
           respond({
             ok: false,
             error:
-              'Action failed. The tab or window may be unavailable, or settings could not be saved.',
+              error instanceof Error
+                ? error.message
+                : 'Action failed. The tab or window may be unavailable, or settings could not be saved.',
           });
         }
       })();
@@ -162,6 +312,15 @@ export default defineBackground(() => {
   chrome.tabs.onAttached.addListener(changed);
   chrome.tabs.onDetached.addListener(changed);
   chrome.tabs.onReplaced.addListener(changed);
+  chrome.sidePanel.onOpened?.addListener((info) => {
+    void panels.opened(info.windowId).catch(report);
+  });
+  chrome.sidePanel.onClosed?.addListener((info) => {
+    void panels.closed(info.windowId).catch(report);
+  });
+  chrome.windows.onRemoved.addListener((id) => {
+    void windows.remove(id).catch(report);
+  });
   chrome.storage.onChanged.addListener((_changes, area) => {
     if (area === 'local') changed();
   });
@@ -176,6 +335,18 @@ export default defineBackground(() => {
       .catch((error: unknown) =>
         console.error('Sidekick side panel unavailable', error),
       );
+    void chrome.runtime
+      .getContexts({
+        contextTypes: ['SIDE_PANEL' as chrome.runtime.ContextType],
+      })
+      .then((contexts) =>
+        Promise.all(
+          contexts
+            .filter((c) => c.windowId >= 0 && typeof c.documentId === 'string')
+            .map((c) => panels.connected(c.windowId, c.documentId!)),
+        ),
+      )
+      .catch(report);
   };
   chrome.runtime.onInstalled.addListener(initialize);
   chrome.runtime.onStartup.addListener(initialize);

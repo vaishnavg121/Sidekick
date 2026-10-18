@@ -11,6 +11,7 @@ export class SidebarClient {
   private disposed = false;
   private retryDelay = 500;
   private windowId?: number;
+  private queryDraft?: string;
   constructor(
     private receive: (event: ServerEvent) => void,
     private connection: (connected: boolean) => void,
@@ -34,7 +35,16 @@ export class SidebarClient {
         if (this.disposed) return;
         this.retryDelay = 500;
         this.connection(true);
-        if (event.type === 'snapshot') this.windowId = event.windowId;
+        if (event.type === 'snapshot') {
+          this.windowId = event.windowId;
+          if (event.windowState.query === this.queryDraft)
+            this.queryDraft = undefined;
+          if (this.queryDraft !== undefined)
+            event = {
+              ...event,
+              windowState: { ...event.windowState, query: this.queryDraft },
+            };
+        }
         this.receive(event);
       });
       this.port.onDisconnect.addListener(() => {
@@ -67,6 +77,15 @@ export class SidebarClient {
           ? reply.error
           : 'Sidekick is reconnecting. Try again.',
       );
+  }
+  async search(query: string): Promise<void> {
+    this.queryDraft = query;
+    try {
+      await this.command({ type: 'search.update', query });
+    } catch (error) {
+      if (this.queryDraft === query) this.queryDraft = undefined;
+      throw error;
+    }
   }
   dispose() {
     this.disposed = true;

@@ -1,6 +1,6 @@
 # Sidekick
 
-An Arc-inspired sidebar for Chrome. Milestone 1 provides the extension foundation, an isolated webpage overlay, a native side panel, and live tab management. It does not alter Chrome's browser chrome.
+An Arc-inspired sidebar for Chrome. Milestone 1.1 provides a hybrid hover overlay and browser-managed pinned panel, with shared live tabs, workspaces, settings and search. It does not replace Chrome's tab strip or New Tab page.
 
 ## Setup and load
 
@@ -23,9 +23,10 @@ For development, `pnpm dev` runs WXT's Chrome development build. Use `pnpm zip` 
 ## Using the sidebar
 
 - **Hover overlay:** delayed edge activation, delayed close, and cancellation when the pointer enters the sidebar. Focus within the sidebar keeps it open. Escape or Collapse dismisses it.
-- **Pinned overlay:** remains visible over the page. Collapse changes this preference to Hover overlay. No page layout is shifted in either overlay mode.
-- **Hidden:** removes both the overlay and edge strip. Use the toolbar side panel to change it back.
-- **Settings:** choose the mode, width (240–440 px), opening delay (0–1500 ms), and closing delay (100–2000 ms). Settings apply across open pages and survive reloads and browser restarts. Native panel width is controlled by Chrome.
+- **Pinned:** click Pin in the overlay to open Chrome's global native side panel. Chrome allocates space alongside the webpage and resizes its viewport. Drag Chrome's panel divider to resize it. The injected overlay and its edge strip are suppressed while the native panel is open. Unpin returns to Hover overlay. Closing the panel using Chrome's own × control also restores hover mode.
+- **Hidden:** no expanded sidebar or automatic hover opening. A minimal edge button remains; click it to return to Hover overlay. The toolbar also provides access on supported and restricted pages.
+- **Settings:** choose the mode, overlay width (240–440 px), opening delay (0–1500 ms), and closing delay (100–2000 ms). These existing preferences are retained across the update. The width slider affects only the hover overlay; native width belongs to Chrome.
+- A saved Pinned preference suppresses the overlay on subsequent pages. Chrome requires a user gesture to open its panel, so click the edge button or toolbar if Chrome has not restored it after relaunch. The extension does not force a panel open on navigation or startup.
 - Search open tabs by title or URL, activate a tab, close an individual tab, or create a new tab. The list covers the sidebar's window, with a total count, active indicator and loading spinner. Destructive tab actions require a direct button click; there is no automatic closing or moving of tabs.
 - Personal is the initial workspace. The selector persists the selected workspace metadata. Favorites and pinned entries are labeled placeholders. Workspace selection does not yet hide, group, move, or filter tabs.
 
@@ -43,7 +44,7 @@ For development, `pnpm dev` runs WXT's Chrome development build. Use `pnpm zip` 
 
 The service worker queries tabs on relevant Chrome events, then sends current-window snapshots to connected views. Queries are serialized/coalesced while busy, so an earlier asynchronous result cannot overwrite newer tab state. Created, updated, removed, activated, moved, attached, detached and replaced events are handled. There is no tab polling or worker keep-alive heartbeat. Disconnected clients retry with bounded exponential backoff, wake the worker and request fresh state. Each command revalidates the target tab's window; stale handles fail visibly instead of affecting another window.
 
-WXT `createShadowRootUi` with `cssInjectionMode: 'ui'` contains styles in a closed shadow root, preventing ordinary host-page scripts from traversing rendered tab titles and URLs. Closed shadow DOM is encapsulation, not a general security boundary against browser debugging or privileged extensions. Pixel-based sizing and Tailwind spacing avoid host `rem` scaling. Click and keyboard events are isolated; reduced-motion preferences are honored. A small observer watches only direct document/body children and remounts on body replacement or host removal; full navigation creates a fresh content script while SPA navigation retains the mounted view. Invalidation unmounts React and disposes ports, observers and timers.
+WXT `createShadowRootUi` with `cssInjectionMode: 'ui'` contains styles in a closed shadow root, preventing ordinary host-page scripts from traversing rendered tab titles and URLs. Closed shadow DOM is encapsulation, not a general security boundary against browser debugging or privileged extensions. The host is a fixed, zero-size child of the document element, outside the body's transformed or clipped containing block. Scoped inline host styles protect positioning without changing website styles or geometry. Pixel-based sizing and Tailwind spacing avoid host `rem` scaling. Click and keyboard events are isolated; reduced-motion preferences are honored. A small observer watches only document/root children and remounts on root replacement or host removal. Body replacement and SPA navigation leave the host intact. Invalidation unmounts React and disposes ports, observers and timers.
 
 ### Persistence and future work
 
@@ -78,6 +79,8 @@ pnpm check
 # Install a separate browser once, then load and test the unpacked build:
 pnpm exec playwright install chromium
 pnpm test:browser
+# A separate real-window check verifies native panel viewport resizing:
+pnpm test:browser:headed
 ```
 
 `pnpm format` applies formatting. Unit tests cover storage initialization, concurrent updates, failures, model validation, folder cycles, session separation, tab reducer/search, restricted metadata, message validation, and hover timing. Browser tests use a temporary isolated Chromium profile, a local HTTP server and the real built extension; they never use your normal browsing profile. Run `pnpm build` before browser tests. Chromium is used because branded Chrome restricts command-line unpacked-extension loading.
@@ -86,4 +89,18 @@ See [docs/verification.md](docs/verification.md) for executed checks and remaini
 
 ## Known milestone limits
 
-Workspace grouping/switching, workspace creation UI, favorite/pinned editing, folders UI, email account behavior, Jev, focus modes, keyboard shortcuts and secrets storage are future work. Preferred email is metadata only. Native panel chrome and physical placement are browser-controlled. Both views may be visible at once if you explicitly open the native panel on an ordinary page. Some sites can cover the overlay with top-layer elements, transform the containing body, or remove extension DOM. Existing pages require reload after extension installation/update; an invalidated content script cannot reconnect until that reload. Incognito has not been validated. Browser-managed restrictions cannot be bypassed.
+Workspace grouping/switching, workspace creation UI, favorite/pinned editing, folders UI, email account behavior, Jev, focus modes, keyboard shortcuts and secrets storage are future work. Preferred email is metadata only. Native panel chrome and placement are browser-controlled. Some sites can cover the overlay with top-layer elements or transform the document element itself. Existing pages require reload after extension installation/update; an invalidated content script cannot reconnect until that reload. Incognito has not been validated. Browser-managed restrictions cannot be bypassed.
+
+## Updating an installed copy
+
+Run `pnpm install --frozen-lockfile`, `pnpm check`, and optionally `pnpm test:browser` / `pnpm test:browser:headed`. In `chrome://extensions`, click **Reload** on the existing Sidekick card. Keep the same unpacked directory and extension ID; do not remove/reinstall or clear storage. Refresh existing HTTP/HTTPS tabs to replace invalidated content scripts. If your saved mode is Pinned, click the toolbar or pinned edge button to open the native panel. Workspace metadata and sidebar preferences retain their existing storage schema; the update does not move or close user tabs.
+
+## Panel compatibility and website access
+
+The Chrome minimum stays at 116 (`sidePanel.open` and `runtime.getContexts`). Pin runs synchronously inside the background message handler to preserve the click gesture. `sidePanel.close` is used when available (Chrome 141+); `onOpened` and `onClosed` are feature-detected (141+ and 142+). Earlier versions use verified native-document subscriptions and context reconciliation. If programmatic close is unavailable, Unpin shows an instruction to use Chrome's × control and keeps the overlay suppressed until the panel closes. No tab-specific panel configuration is installed; the global panel stays available across normal, New Tab and internal pages. See [Chrome's API reference](https://developer.chrome.com/docs/extensions/reference/api/sidePanel).
+
+`lib/panel-service.ts` coordinates opening, closing and mode persistence. `lib/window-state.ts` stores per-window search, panel presence and native document handles in session storage. Both renderers consume the same background snapshots, workspace repository and tab actions; they do not maintain separate search or tab business logic. Session state survives worker restart and clears with the browser session. The last chosen display preference remains local metadata shared across windows; other windows in saved Pinned mode offer a click-to-open edge button when their native panel is not open.
+
+The existing HTTP/HTTPS match patterns already include Google Search, Gmail, Drive, YouTube, GitHub, example.com and their subdomains. No extra host permissions are added. Check **Sidekick → Details → Site access** and grant the intended sites; refresh the page after granting access. Withheld site access, enterprise policy, a not-yet-refreshed extension update, and browser-restricted URLs are distinct from a mount failure. Chrome's built-in New Tab page cannot host this content script. Use the toolbar/native panel there. No New Tab override is declared.
+
+See [Milestone 1.1 results](docs/milestone-1.1.md) for root causes, automated coverage and the limits of signed-out live-site checks.

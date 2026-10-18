@@ -65,14 +65,31 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
   const state = useSidebar();
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
+  const [pinPending, setPinPending] = useState(false);
+  const hover = useMemo(() => new HoverController(setOpen), []);
   const [client] = useState(
     () =>
-      new SidebarClient(
-        useSidebar.getState().receive,
-        useSidebar.getState().setConnected,
-      ),
+      new SidebarClient((event) => {
+        if (event.type === 'snapshot') {
+          const mode = event.metadata.preferences.mode;
+          if (event.windowState.nativePanelOpen || mode === 'pinned') {
+            hover.cancelReveal();
+            hover.close();
+            setFocused(false);
+          } else if (mode === 'hidden' && !hover.revealRequested) {
+            hover.close();
+            setFocused(false);
+          } else if (mode === 'hover' && hover.revealRequested) {
+            // An older Hidden snapshot must not cancel a user's edge click
+            // while its change-to-Hover command is still being processed.
+            hover.cancelReveal();
+            setOpen(true);
+          }
+          if (event.windowState.nativePanelOpen) setPinPending(false);
+        }
+        useSidebar.getState().receive(event);
+      }, useSidebar.getState().setConnected),
   );
-  const hover = useMemo(() => new HoverController(setOpen), []);
   useEffect(() => {
     void client.start(nativePanel);
     return () => {
@@ -83,45 +100,110 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
   const preferences = state.metadata?.preferences ?? DEFAULT_PREFERENCES;
   const visible =
     nativePanel ||
-    (preferences.mode !== 'hidden' &&
-      (preferences.mode === 'pinned' || open || focused));
+    (!pinPending &&
+      !state.windowState.nativePanelOpen &&
+      preferences.mode === 'hover' &&
+      (open || focused));
   const tabs = searchTabs(state.tabs, state.query);
   const workspace = state.metadata?.workspaces.find(
     (w) => w.id === state.metadata?.activeWorkspaceId,
   );
   const run = (command: Command) => {
     state.setError(undefined);
+    const pinning =
+      command.type === 'panel.pin' ||
+      (command.type === 'preferences.update' &&
+        command.patch.mode === 'pinned');
+    if (pinning) {
+      hover.cancelReveal();
+      setPinPending(true);
+      hover.close();
+      setFocused(false);
+    }
     void client
       .command(command)
-      .catch((error: unknown) =>
+      .then(() => {
+        if (pinning) setPinPending(false);
+      })
+      .catch((error: unknown) => {
+        hover.cancelReveal();
+        if (pinning) {
+          setPinPending(false);
+          setOpen(true);
+        }
         state.setError(
           error instanceof Error ? error.message : 'Action failed. Try again.',
-        ),
-      );
+        );
+      });
   };
   const collapse = () => {
+    hover.cancelReveal();
     hover.close();
     setFocused(false);
-    if (preferences.mode === 'pinned')
-      run({ type: 'preferences.update', patch: { mode: 'hover' } });
+  };
+  const setSearch = (query: string) => {
+    state.setQuery(query);
+    void client
+      .search(query)
+      .catch((error: unknown) =>
+        state.setError(
+          error instanceof Error
+            ? error.message
+            : 'Search could not be synchronized.',
+        ),
+      );
   };
   return (
     <div
       className={`sidekick-root ${nativePanel ? 'native' : 'overlay'}`}
       style={{ '--sidebar-width': `${preferences.width}px` } as CSSProperties}
     >
-      {!nativePanel && preferences.mode !== 'hidden' && (
+      {!nativePanel && !pinPending && !state.windowState.nativePanelOpen && (
         <button
           className="edge-strip"
-          aria-label="Open Sidekick"
+          aria-label={
+            preferences.mode === 'pinned'
+              ? 'Open pinned Sidekick'
+              : 'Open Sidekick'
+          }
           aria-expanded={visible}
-          onPointerEnter={() => hover.enter(preferences.openDelay)}
-          onPointerLeave={() => hover.leave(preferences.closeDelay)}
-          onFocus={() => setOpen(true)}
-          onClick={() => setOpen(true)}
+          onPointerEnter={() => {
+            if (preferences.mode === 'hover')
+              hover.enter(preferences.openDelay);
+          }}
+          onPointerLeave={() => {
+            hover.cancelReveal();
+            hover.leave(preferences.closeDelay);
+          }}
+          onFocus={() => {
+            if (preferences.mode === 'hover') setOpen(true);
+          }}
+          onClick={() => {
+            hover.cancel();
+            if (preferences.mode === 'pinned') run({ type: 'panel.pin' });
+            else {
+              if (preferences.mode === 'hidden') {
+                hover.requestReveal();
+                run({ type: 'sidebar.mode', mode: 'hover' });
+              }
+              setOpen(true);
+            }
+          }}
         >
           <span />
         </button>
+      )}
+      {!nativePanel && !visible && state.error && (
+        <div className="edge-error" role="alert">
+          {state.error}
+          <button
+            className="icon-button"
+            aria-label="Dismiss error"
+            onClick={() => state.setError(undefined)}
+          >
+            <Icon name="close" size={14} />
+          </button>
+        </div>
       )}
       <aside
         className={`sidebar ${visible ? 'is-visible' : ''}`}
@@ -157,15 +239,38 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
               sidekick<span className="brand-period">.</span>
             </span>
           </div>
-          {!nativePanel && (
+          <div className="header-actions">
             <button
               className="icon-button"
-              aria-label="Collapse sidebar"
-              onClick={collapse}
+              aria-label={
+                nativePanel ? 'Unpin to hover sidebar' : 'Pin sidebar'
+              }
+              title={
+                nativePanel
+                  ? 'Return to hover overlay'
+                  : 'Pin in Chrome side panel'
+              }
+              disabled={!state.connected}
+              onClick={() =>
+                run(
+                  nativePanel
+                    ? { type: 'sidebar.mode', mode: 'hover' }
+                    : { type: 'panel.pin' },
+                )
+              }
             >
-              <Icon name="collapse" />
+              <Icon name="pin" />
             </button>
-          )}
+            {!nativePanel && (
+              <button
+                className="icon-button"
+                aria-label="Collapse sidebar"
+                onClick={collapse}
+              >
+                <Icon name="collapse" />
+              </button>
+            )}
+          </div>
         </header>
         <div className="workspace-card">
           <span
@@ -204,6 +309,11 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
             </button>
           </div>
         )}
+        {state.windowState.notice && (
+          <div role="status" className="panel-notice">
+            {state.windowState.notice}
+          </div>
+        )}
         {state.settings ? (
           <div className="scroll-area">
             <Settings
@@ -219,13 +329,14 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
                 aria-label="Search tabs"
                 placeholder="Search your tabs…"
                 value={state.query}
-                onChange={(e) => state.setQuery(e.target.value)}
+                maxLength={2000}
+                onChange={(e) => setSearch(e.target.value)}
               />
               {state.query && (
                 <button
                   className="icon-button"
                   aria-label="Clear search"
-                  onClick={() => state.setQuery('')}
+                  onClick={() => setSearch('')}
                 >
                   <Icon name="close" size={14} />
                 </button>

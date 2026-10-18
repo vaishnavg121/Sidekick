@@ -1,7 +1,7 @@
 {
   "name": "sidekick",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
   "engines": {
@@ -17,7 +17,8 @@
     "format": "prettier --write .",
     "format:check": "prettier --check .",
     "test": "vitest run",
-    "test:browser": "playwright test",
+    "test:browser": "playwright test --project=chrome",
+    "test:browser:headed": "playwright test --project=chrome-headed",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build"
   },
   "dependencies": {
