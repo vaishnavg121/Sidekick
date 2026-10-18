@@ -3,12 +3,15 @@ import type { StorageArea } from './repository';
 export interface WindowUiState {
   query: string;
   nativePanelOpen: boolean;
+  immersive: boolean;
+  restoreState?: 'normal' | 'maximized';
   nativeDocumentId?: string;
   notice?: string;
 }
 export const EMPTY_WINDOW_STATE: WindowUiState = {
   query: '',
   nativePanelOpen: false,
+  immersive: false,
 };
 const KEY = 'sidekick.window-ui.v1';
 

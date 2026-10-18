@@ -131,6 +131,12 @@ export class MetadataRepository {
       favorites: upsert(m.favorites, favorite),
     }));
   }
+  removeFavorite(id: string): Promise<Metadata> {
+    return this.update((m) => ({
+      ...m,
+      favorites: m.favorites.filter((f) => f.id !== id),
+    }));
+  }
   savePinnedEntry(entry: PinnedEntry): Promise<Metadata> {
     return this.update((m) => ({
       ...m,

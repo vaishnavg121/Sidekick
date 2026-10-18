@@ -7,6 +7,10 @@ export default defineConfig({
   reporter: 'list',
   projects: [
     { name: 'chrome', use: { headless: true } },
-    { name: 'chrome-headed', use: { headless: false }, grep: /Pin opens/ },
+    {
+      name: 'chrome-headed',
+      use: { headless: false },
+      grep: /Pin opens|Immersive/,
+    },
   ],
 });

@@ -24,15 +24,20 @@ export const useSidebar = create<UiState>((set) => ({
   connected: false,
   windowState: { ...EMPTY_WINDOW_STATE },
   receive: (event) =>
-    event.type === 'error'
-      ? set({ error: event.error })
-      : set((state) => ({
-          metadata: event.metadata,
-          windowState: event.windowState,
-          query: event.windowState.query,
-          tabs: tabReducer(state.tabs, { type: 'snapshot', tabs: event.tabs }),
-          error: undefined,
-        })),
+    event.type === 'focus'
+      ? undefined
+      : event.type === 'error'
+        ? set({ error: event.error })
+        : set((state) => ({
+            metadata: event.metadata,
+            windowState: event.windowState,
+            query: event.windowState.query,
+            tabs: tabReducer(state.tabs, {
+              type: 'snapshot',
+              tabs: event.tabs,
+            }),
+            error: undefined,
+          })),
   setQuery: (query) => set({ query }),
   setSettings: (settings) => set({ settings }),
   setConnected: (connected) => set({ connected }),

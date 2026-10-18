@@ -2,6 +2,291 @@
 @source './Sidebar.tsx';
 @source './Settings.tsx';
 @source './Icon.tsx';
+
+.navigation {
+  margin: 0 16px 12px;
+  flex-shrink: 0;
+}
+.page-heading {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  color: #aaa9b7;
+  font-size: 11px;
+  margin-bottom: 6px;
+}
+.navigation-actions {
+  display: flex;
+  gap: 2px;
+  margin-bottom: 7px;
+}
+.navigation-actions button:last-child {
+  margin-left: auto;
+}
+.address-form {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  background: #ffffff07;
+  border: 1px solid #ffffff15;
+  border-radius: 9px;
+  padding: 5px 6px 5px 10px;
+  color: #aaa9b7;
+}
+.address-form input {
+  min-width: 0;
+  flex: 1;
+  background: transparent;
+  color: #ececf0;
+  border: none;
+  outline-offset: 1px;
+  font-size: 11px;
+}
+.immersive-controls {
+  padding: 0 16px 10px;
+  flex-shrink: 0;
+}
+.immersive-controls > button {
+  border: 1px solid #b7a3ff38;
+  color: #cdbfff;
+  background: #b7a3ff0c;
+  border-radius: 7px;
+  padding: 5px 9px;
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+}
+.immersive-controls > span {
+  display: block;
+  font-size: 10px;
+  color: #aaa9b7;
+  margin-top: 5px;
+}
+.immersive-active > button {
+  background: #b7a3ff21;
+}
+.favorites-view {
+  padding: 10px 16px 0;
+}
+.favorites-view .section-label .icon-button {
+  margin-left: auto;
+}
+.shortcut-list,
+.bookmark-tree,
+.bookmark-tree ul,
+.dashboard-tabs {
+  list-style: none;
+  padding: 0;
+  margin: 6px 0;
+}
+.shortcut-list li,
+.bookmark-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-width: 0;
+}
+.shortcut-open,
+.bookmark-open {
+  display: flex;
+  gap: 9px;
+  align-items: center;
+  color: #d1cfdd;
+  border: 0;
+  background: none;
+  padding: 8px 4px;
+  text-align: left;
+  min-width: 0;
+  flex: 1;
+}
+.pinned-label {
+  margin-top: 16px;
+}
+.shortcut-form {
+  background: #ffffff06;
+  border: 1px solid #ffffff12;
+  border-radius: 8px;
+  padding: 10px;
+}
+.shortcut-form label {
+  display: block;
+  font-size: 11px;
+  color: #aaa9b7;
+  margin-bottom: 8px;
+}
+.shortcut-form input,
+.bookmark-search {
+  display: block;
+  width: 100%;
+  background: #17181d;
+  border: 1px solid #ffffff20;
+  color: #ececf0;
+  padding: 8px;
+  border-radius: 6px;
+  margin-top: 4px;
+}
+.text-button {
+  background: #ffffff08;
+  border: 1px solid #ffffff17;
+  color: #c8bcf5;
+  border-radius: 6px;
+  padding: 6px 9px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin: 4px 4px 4px 0;
+}
+.bookmarks-view {
+  padding: 10px 16px 20px;
+}
+.bookmarks-view h2 {
+  font-size: 15px;
+  margin: 0 0 7px;
+}
+.bookmark-tree ul {
+  margin-left: 13px;
+  padding-left: 8px;
+  border-left: 1px solid #ffffff12;
+}
+.folder-toggle {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  text-align: left;
+  padding: 9px 0;
+  background: none;
+  color: #c7c1d8;
+  border: 0;
+}
+.folder-toggle span {
+  margin-left: auto;
+}
+.bookmark-open {
+  font-size: 12px;
+}
+.dashboard {
+  min-height: 100vh;
+  padding: 25px 40px;
+  background:
+    radial-gradient(ellipse at 30% 0, #37304755, transparent 60%), #17181d;
+}
+.dashboard-top {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  max-width: 1180px;
+  margin: 0 auto;
+}
+.dashboard-tools {
+  display: flex;
+  gap: 8px;
+}
+.dashboard-content {
+  max-width: 920px;
+  margin: 60px auto 0;
+}
+.dashboard-content > .workspace-card {
+  width: 230px;
+  margin: 0 0 35px;
+}
+.dashboard h1 {
+  font-weight: 500;
+  font-size: clamp(28px, 4vw, 42px);
+  letter-spacing: -1.4px;
+  margin: 10px 0;
+  line-height: 1.2;
+}
+.dashboard-intro {
+  color: #a5a3b0;
+  margin: 16px 0 28px;
+}
+.dashboard-navigation {
+  margin: 0 0 18px;
+}
+.dashboard .address-form {
+  padding: 10px 14px;
+  background: #26252e;
+  border-radius: 12px;
+}
+.dashboard .address-form input {
+  font-size: 15px;
+  padding: 4px;
+}
+.dashboard .immersive-controls {
+  padding: 0;
+}
+.dashboard .immersive-controls > button {
+  padding: 7px 10px;
+}
+.recovery-note {
+  margin: 12px 0 28px;
+  max-width: 640px;
+}
+.dashboard-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 22px;
+  align-items: start;
+}
+.dashboard-card {
+  min-width: 0;
+  border: 1px solid #ffffff12;
+  border-radius: 14px;
+  padding: 15px;
+  background: #ffffff03;
+}
+.dashboard-card .favorites-view {
+  padding: 0;
+}
+.dashboard-card > .text-button {
+  margin-top: 16px;
+}
+.dashboard-card .bookmarks-view {
+  padding: 16px 0 0;
+}
+.dashboard-tabs {
+  max-height: 320px;
+  overflow: auto;
+}
+.dashboard-tabs button {
+  display: flex;
+  gap: 9px;
+  width: 100%;
+  text-align: left;
+  color: #bfbaca;
+  background: none;
+  border: none;
+  padding: 9px 0;
+  align-items: center;
+}
+.dashboard-tabs button[aria-current] {
+  color: #c9b8ff;
+}
+.dashboard-tabs .active-dot {
+  margin-left: auto;
+}
+.dashboard-footer {
+  color: #817e91;
+  font-size: 11px;
+  margin-top: 32px;
+  text-align: center;
+}
+.dashboard .settings-view {
+  max-width: 580px;
+}
+@media (max-width: 650px) {
+  .dashboard {
+    padding: 20px;
+  }
+  .dashboard-content {
+    margin-top: 35px;
+  }
+  .dashboard-grid {
+    grid-template-columns: 1fr;
+  }
+}
 @theme {
   --spacing: 4px;
 }

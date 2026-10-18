@@ -4,6 +4,7 @@ import {
   type Reply,
   type ServerEvent,
 } from './protocol';
+import { focusAddress, pageControls } from './page-controls';
 
 export class SidebarClient {
   private port?: chrome.runtime.Port;
@@ -35,6 +36,11 @@ export class SidebarClient {
         if (this.disposed) return;
         this.retryDelay = 500;
         this.connection(true);
+        if (event.type === 'focus') {
+          if (event.address) focusAddress();
+          else pageControls.dispatchEvent(new Event('reveal'));
+          return;
+        }
         if (event.type === 'snapshot') {
           this.windowId = event.windowId;
           if (event.windowState.query === this.queryDraft)
@@ -65,7 +71,7 @@ export class SidebarClient {
       });
     }
   }
-  async command(command: Command): Promise<void> {
+  async request(command: Command): Promise<Extract<Reply, { ok: true }>> {
     const reply = (await chrome.runtime.sendMessage({
       channel: 'sidekick',
       command,
@@ -77,6 +83,10 @@ export class SidebarClient {
           ? reply.error
           : 'Sidekick is reconnecting. Try again.',
       );
+    return reply;
+  }
+  async command(command: Command): Promise<void> {
+    await this.request(command);
   }
   async search(query: string): Promise<void> {
     this.queryDraft = query;

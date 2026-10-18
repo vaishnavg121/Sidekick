@@ -56,6 +56,25 @@ export function Settings({
         </label>
       ))}
       <div className="info-card">
+        <strong>Immersive recovery</strong>
+        <p>
+          Press F11 (or Fn+F11) to show Chrome’s toolbar again, even after
+          Sidekick is disabled or reloaded. Disabling Sidekick does not exit
+          fullscreen.
+        </p>
+        <p>
+          Alt+Shift+L focuses navigation. Alt+Shift+S reveals Sidekick.
+          Alt+Shift+E exits immersive mode. Check or change assignments at
+          chrome://extensions/shortcuts.
+        </p>
+        <p>
+          If Chrome’s native panel is unavailable, choose Hover overlay. It
+          floats over the page while open; collapse it to reach the page
+          underneath. Restricted Chrome pages require the native panel, the New
+          Tab page, or F11.
+        </p>
+      </div>
+      <div className="info-card">
         <strong>Always within reach</strong>
         <p>
           Click the Sidekick toolbar icon to open Chrome’s native side panel,

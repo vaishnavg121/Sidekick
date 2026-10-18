@@ -7,6 +7,11 @@ import type { Command } from '../lib/protocol';
 import { HoverController } from './hover';
 import { Icon } from './Icon';
 import { Settings } from './Settings';
+import { Navigation, ImmersiveControls } from './Navigation';
+import { WorkspaceSelector } from './WorkspaceSelector';
+import { Favorites } from './Favorites';
+import { Bookmarks } from './Bookmarks';
+import { pageControls } from '../lib/page-controls';
 
 function TabRow({
   tab,
@@ -66,17 +71,26 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinPending, setPinPending] = useState(false);
+  const [bookmarks, setBookmarks] = useState(false);
+  const [forcedReveal, setForcedReveal] = useState(false);
   const hover = useMemo(() => new HoverController(setOpen), []);
   const [client] = useState(
     () =>
       new SidebarClient((event) => {
         if (event.type === 'snapshot') {
           const mode = event.metadata.preferences.mode;
-          if (event.windowState.nativePanelOpen || mode === 'pinned') {
+          if (
+            event.windowState.nativePanelOpen ||
+            (mode === 'pinned' && !hover.revealRequested)
+          ) {
             hover.cancelReveal();
             hover.close();
             setFocused(false);
-          } else if (mode === 'hidden' && !hover.revealRequested) {
+          } else if (
+            mode === 'hidden' &&
+            !event.windowState.immersive &&
+            !hover.revealRequested
+          ) {
             hover.close();
             setFocused(false);
           } else if (mode === 'hover' && hover.revealRequested) {
@@ -97,17 +111,32 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
       client.dispose();
     };
   }, [client, hover, nativePanel]);
+  useEffect(() => {
+    const reveal = () => {
+      hover.cancel();
+      hover.requestReveal();
+      setForcedReveal(true);
+      setOpen(true);
+    };
+    pageControls.addEventListener('address', reveal);
+    pageControls.addEventListener('reveal', reveal);
+    return () => {
+      pageControls.removeEventListener('address', reveal);
+      pageControls.removeEventListener('reveal', reveal);
+    };
+  }, [hover]);
   const preferences = state.metadata?.preferences ?? DEFAULT_PREFERENCES;
+  const effectiveMode =
+    state.windowState.immersive && preferences.mode === 'hidden'
+      ? 'hover'
+      : preferences.mode;
   const visible =
     nativePanel ||
     (!pinPending &&
       !state.windowState.nativePanelOpen &&
-      preferences.mode === 'hover' &&
+      (effectiveMode === 'hover' || forcedReveal) &&
       (open || focused));
   const tabs = searchTabs(state.tabs, state.query);
-  const workspace = state.metadata?.workspaces.find(
-    (w) => w.id === state.metadata?.activeWorkspaceId,
-  );
   const run = (command: Command) => {
     state.setError(undefined);
     const pinning =
@@ -137,6 +166,7 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
       });
   };
   const collapse = () => {
+    setForcedReveal(false);
     hover.cancelReveal();
     hover.close();
     setFocused(false);
@@ -162,27 +192,26 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
         <button
           className="edge-strip"
           aria-label={
-            preferences.mode === 'pinned'
+            effectiveMode === 'pinned'
               ? 'Open pinned Sidekick'
               : 'Open Sidekick'
           }
           aria-expanded={visible}
           onPointerEnter={() => {
-            if (preferences.mode === 'hover')
-              hover.enter(preferences.openDelay);
+            if (effectiveMode === 'hover') hover.enter(preferences.openDelay);
           }}
           onPointerLeave={() => {
             hover.cancelReveal();
             hover.leave(preferences.closeDelay);
           }}
           onFocus={() => {
-            if (preferences.mode === 'hover') setOpen(true);
+            if (effectiveMode === 'hover') setOpen(true);
           }}
           onClick={() => {
             hover.cancel();
-            if (preferences.mode === 'pinned') run({ type: 'panel.pin' });
+            if (effectiveMode === 'pinned') run({ type: 'panel.pin' });
             else {
-              if (preferences.mode === 'hidden') {
+              if (effectiveMode === 'hidden') {
                 hover.requestReveal();
                 run({ type: 'sidebar.mode', mode: 'hover' });
               }
@@ -202,6 +231,12 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
             onClick={() => state.setError(undefined)}
           >
             <Icon name="close" size={14} />
+          </button>
+          <button
+            className="text-button"
+            onClick={() => run({ type: 'sidebar.mode', mode: 'hover' })}
+          >
+            Use hover sidebar
           </button>
         </div>
       )}
@@ -272,32 +307,9 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
             )}
           </div>
         </header>
-        <div className="workspace-card">
-          <span
-            className="workspace-avatar"
-            style={{ backgroundColor: workspace?.color ?? '#b7a3ff' }}
-          >
-            {workspace?.name.charAt(0) ?? 'P'}
-          </span>
-          <div className="workspace-info">
-            <label htmlFor="workspace-select">YOUR WORKSPACE</label>
-            <select
-              id="workspace-select"
-              aria-label="Workspace"
-              value={state.metadata?.activeWorkspaceId ?? ''}
-              disabled={!state.metadata}
-              onChange={(e) =>
-                run({ type: 'workspace.select', id: e.target.value })
-              }
-            >
-              {state.metadata?.workspaces.map((w) => (
-                <option key={w.id} value={w.id}>
-                  {w.name}
-                </option>
-              )) ?? <option value="">Loading…</option>}
-            </select>
-          </div>
-        </div>
+        <WorkspaceSelector run={run} />
+        <ImmersiveControls client={client} />
+        <Navigation client={client} visible={visible} />
         {state.error && (
           <div role="alert" className="error-message">
             {state.error}
@@ -321,6 +333,10 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
               update={(patch) => run({ type: 'preferences.update', patch })}
             />
           </div>
+        ) : bookmarks ? (
+          <div className="scroll-area">
+            <Bookmarks client={client} />
+          </div>
         ) : (
           <>
             <div className="search-box flex items-center gap-2">
@@ -343,29 +359,7 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
               )}
             </div>
             <div className="scroll-area">
-              {!state.query && (
-                <div className="placeholders">
-                  <section>
-                    <div className="section-label">
-                      <Icon name="star" size={13} /> FAVORITES{' '}
-                      <span className="soon">SOON</span>
-                    </div>
-                    <div className="favorite-slot">
-                      <Icon name="plus" size={18} />
-                      <span>A home for your everyday sites</span>
-                    </div>
-                  </section>
-                  <section>
-                    <div className="section-label">
-                      <Icon name="pin" size={13} /> PINNED{' '}
-                      <span className="soon">SOON</span>
-                    </div>
-                    <p className="placeholder-note">
-                      Keep the important things close.
-                    </p>
-                  </section>
-                </div>
-              )}
+              {!state.query && <Favorites client={client} />}
               <section className="tabs-section">
                 <div className="section-label">
                   {state.query ? 'SEARCH RESULTS' : 'OPEN TABS'}
@@ -412,6 +406,17 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
           </>
         )}
         <footer className="sidebar-footer flex items-center justify-between">
+          <button
+            className="icon-button"
+            aria-label={bookmarks ? 'Show tabs' : 'Open bookmarks'}
+            aria-pressed={bookmarks}
+            onClick={() => {
+              state.setSettings(false);
+              setBookmarks(!bookmarks);
+            }}
+          >
+            <Icon name="folder" size={17} />
+          </button>
           <span className="connection-status">
             <i className={state.connected ? 'connected' : ''} />
             {state.connected ? 'All tabs · this window' : 'Reconnecting…'}

@@ -11,10 +11,31 @@ export function Icon({
     | 'star'
     | 'pin'
     | 'arrow'
-    | 'globe';
+    | 'globe'
+    | 'back'
+    | 'reload'
+    | 'stop'
+    | 'copy'
+    | 'fullscreen'
+    | 'folder';
   size?: number;
 }) {
   const paths = {
+    back: <path d="m15 5-7 7 7 7" />,
+    reload: (
+      <>
+        <path d="M20 10a8 8 0 1 0-1 7M20 4v6h-6" />
+      </>
+    ),
+    stop: <rect x="6" y="6" width="12" height="12" rx="1" />,
+    copy: (
+      <>
+        <rect x="8" y="8" width="12" height="13" rx="2" />
+        <path d="M16 8V3H3v13h5" />
+      </>
+    ),
+    fullscreen: <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />,
+    folder: <path d="M3 7V4h6l3 3h9v13H3Z" />,
     search: (
       <>
         <circle cx="10.5" cy="10.5" r="6.5" />

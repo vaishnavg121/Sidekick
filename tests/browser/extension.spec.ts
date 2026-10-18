@@ -75,6 +75,14 @@ test.beforeAll(async ({ browserName }, testInfo) => {
   }));
   server = createServer((req, res) => {
     res.setHeader('Content-Type', 'text/html');
+    if (req.url === '/very-slow') {
+      res.write(
+        '<!doctype html><title>Still loading</title><body>A slow response',
+      );
+      const timer = setTimeout(() => res.end('Done'), 30000);
+      res.on('close', () => clearTimeout(timer));
+      return;
+    }
     if (req.url === '/slow') {
       res.write('<!doctype html><title>Slow garden</title>');
       setTimeout(() => res.end('<body>Finished loading</body>'), 1500);
@@ -105,6 +113,456 @@ test.beforeAll(async ({ browserName }, testInfo) => {
     context.serviceWorkers()[0] ??
     (await context.waitForEvent('serviceworker'));
   extensionId = new URL(worker.url()).host;
+});
+
+test('New Tab replaces Chrome home and manages workspace shortcuts without changing bookmarks', async () => {
+  const page = await context.newPage();
+  await page.goto('chrome://newtab/');
+  await expect(
+    page.getByRole('heading', { name: 'Make room for what matters.' }),
+  ).toBeVisible();
+  expect(
+    await worker.evaluate(
+      () => chrome.runtime.getManifest().chrome_url_overrides?.newtab,
+    ),
+  ).toBe('newtab.html');
+  await expect(page.locator('sidekick-sidebar')).toHaveCount(0);
+  const folder = await worker.evaluate(async () => {
+    const [root] = await chrome.bookmarks.getTree();
+    const parentId = root!.children!.find((node) => node.children)?.id;
+    const folder = await chrome.bookmarks.create({
+      parentId,
+      title: 'Sidekick fixture folder',
+    });
+    await chrome.bookmarks.create({
+      parentId: folder.id,
+      title: 'Garden bookmark',
+      url: 'https://example.com/garden',
+    });
+    await chrome.bookmarks.create({
+      parentId: folder.id,
+      title: 'Unsafe bookmark',
+      url: 'javascript:alert(1)',
+    });
+    return folder.id;
+  });
+  const bookmarksBefore = await worker.evaluate(() =>
+    chrome.bookmarks.getTree(),
+  );
+  await page.getByRole('button', { name: 'Browse Chrome bookmarks' }).click();
+  await page
+    .getByRole('button', { name: /Bookmarks bar|Bookmarks toolbar/ })
+    .click();
+  const folderButton = page.getByRole('button', {
+    name: /Sidekick fixture folder/,
+  });
+  await folderButton.click();
+  await expect(
+    page.getByRole('button', { name: 'Unsafe bookmark', exact: true }),
+  ).toBeDisabled();
+  await page.getByLabel('Search bookmarks').fill('Garden bookmark');
+  await page
+    .getByRole('button', {
+      name: 'Favorite bookmark Garden bookmark',
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole('button', { name: 'Garden bookmark', exact: true }).first(),
+  ).toBeVisible();
+  expect(await worker.evaluate(() => chrome.bookmarks.getTree())).toEqual(
+    bookmarksBefore,
+  );
+  await page.getByRole('button', { name: 'Hide bookmarks' }).click();
+  await page.getByRole('button', { name: 'Add shortcut' }).click();
+  await page.getByLabel('Shortcut name').fill('My garden');
+  await page.getByLabel('Web address').fill(`${origin}/shortcut`);
+  await page.getByRole('button', { name: 'Save shortcut' }).click();
+  await expect(
+    page.getByRole('button', { name: 'My garden', exact: true }),
+  ).toBeVisible();
+  await page
+    .getByRole('button', { name: 'Edit My garden', exact: true })
+    .click();
+  await page.getByLabel('Shortcut name').fill('Updated garden');
+  await page.getByRole('button', { name: 'Save shortcut' }).click();
+  await expect(
+    page.getByRole('button', { name: 'Updated garden', exact: true }),
+  ).toBeVisible();
+  await page.reload();
+  await expect(
+    page.getByRole('button', { name: 'Updated garden', exact: true }),
+  ).toBeVisible();
+  const originalWorkspace = await page
+    .getByLabel('Workspace', { exact: true })
+    .inputValue();
+  await worker.evaluate(async () => {
+    const key = 'sidekick.metadata.v1';
+    const metadata = (await chrome.storage.local.get(key))[key] as Metadata;
+    metadata.workspaces.push({
+      id: 'dashboard-other',
+      name: 'Other workspace',
+      color: '#80cbc4',
+      createdAt: new Date().toISOString(),
+    });
+    await chrome.storage.local.set({ [key]: metadata });
+  });
+  await page
+    .getByLabel('Workspace', { exact: true })
+    .selectOption('dashboard-other');
+  await expect(
+    page.getByRole('button', { name: 'Updated garden', exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByLabel('Workspace', { exact: true })
+    .selectOption(originalWorkspace);
+  await expect(
+    page.getByRole('button', { name: 'Updated garden', exact: true }),
+  ).toBeVisible();
+  await page.screenshot({ path: 'test-results/newtab.png', fullPage: true });
+  await page
+    .getByRole('button', {
+      name: 'Remove favorite Updated garden',
+      exact: true,
+    })
+    .click();
+  await expect(
+    page.getByRole('button', { name: 'Updated garden', exact: true }),
+  ).toHaveCount(0);
+  await page
+    .getByRole('button', {
+      name: 'Remove favorite Garden bookmark',
+      exact: true,
+    })
+    .click();
+  // Only this isolated test creates/removes Chrome fixtures; production is read-only.
+  await worker.evaluate((id) => chrome.bookmarks.removeTree(id), folder);
+  await page.close();
+});
+
+test('address controls navigate, search, reject scripts, stop, reload and traverse history', async () => {
+  const page = await context.newPage();
+  await page.goto('chrome://newtab/');
+  const address = page.getByLabel('Address or Google search', { exact: true });
+  await address.fill('javascript:document.title="unsafe"');
+  await address.press('Enter');
+  await expect(page.getByRole('alert')).toContainText('scheme');
+  await address.fill(`${origin}/navigation`);
+  await address.press('Enter');
+  await expect(page).toHaveURL(`${origin}/navigation`);
+  await inspectOverlay(page);
+  let ui = page.locator('sidekick=.sidekick-root');
+  await worker.evaluate(async () => {
+    const [tab] = await chrome.tabs.query({
+      active: true,
+      lastFocusedWindow: true,
+    });
+    await chrome.tabs.sendMessage(tab!.id!, {
+      channel: 'sidekick:page',
+      action: 'focus-address',
+    });
+  });
+  await expect(
+    ui.getByRole('complementary', { includeHidden: true }),
+  ).toBeVisible();
+  await expect
+    .poll(() =>
+      ui
+        .getByLabel('Address or Google search')
+        .evaluate(
+          (input) =>
+            (input.getRootNode() as ShadowRoot).activeElement === input,
+        ),
+    )
+    .toBe(true);
+  await ui.getByLabel('Address or Google search').fill(`${origin}/second`);
+  await ui.getByLabel('Address or Google search').press('Enter');
+  await expect(page).toHaveURL(`${origin}/second`);
+  await inspectOverlay(page);
+  ui = page.locator('sidekick=.sidekick-root');
+  await ui.getByRole('button', { name: 'Open Sidekick', exact: true }).click();
+  await ui.getByRole('button', { name: 'Go back', exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/navigation`);
+  await inspectOverlay(page);
+  await ui.getByRole('button', { name: 'Open Sidekick', exact: true }).click();
+  await ui.getByRole('button', { name: 'Go forward', exact: true }).click();
+  await expect(page).toHaveURL(`${origin}/second`);
+  await inspectOverlay(page);
+  await ui.getByRole('button', { name: 'Open Sidekick', exact: true }).click();
+  await ui.getByRole('button', { name: 'Reload page', exact: true }).click();
+  await page.waitForLoadState();
+  await expect(page).toHaveURL(`${origin}/second`);
+  await page.goto(`${origin}/very-slow`, { waitUntil: 'commit' });
+  await inspectOverlay(page);
+  await ui.getByRole('button', { name: 'Open Sidekick', exact: true }).click();
+  await ui.getByRole('button', { name: 'Stop loading', exact: true }).click();
+  await expect(
+    ui.getByRole('button', { name: 'Reload page', exact: true }),
+  ).toBeVisible();
+  await context.grantPermissions(['clipboard-read', 'clipboard-write'], {
+    origin,
+  });
+  await ui.getByLabel('Address or Google search').fill('an unfinished draft');
+  await ui
+    .getByRole('button', { name: 'Copy current URL', exact: true })
+    .click();
+  await expect
+    .poll(() => page.evaluate(() => navigator.clipboard.readText()))
+    .toBe(`${origin}/very-slow`);
+  await context.clearPermissions();
+  // Intercept the destination to validate the exact Google query without an
+  // external network dependency or bypassing Google's anti-bot challenge.
+  await context.route('https://www.google.com/search**', (route) =>
+    route.fulfill({
+      contentType: 'text/html',
+      body: '<title>Search destination</title><body>Search query received</body>',
+    }),
+  );
+  await ui.getByLabel('Address or Google search').fill('a quiet garden & tea');
+  await ui.getByLabel('Address or Google search').press('Enter');
+  await expect(page).toHaveURL(
+    'https://www.google.com/search?q=a%20quiet%20garden%20%26%20tea',
+  );
+  await context.unroute('https://www.google.com/search**');
+  await page.close();
+});
+
+test('Immersive restores fullscreen windows, keeps native/hover access, and survives worker restart', async () => {
+  test.skip(
+    headless,
+    'Fullscreen browser chrome and OS recovery require headed Chrome.',
+  );
+  const page = await context.newPage();
+  await page.goto(origin);
+  const windowId = await worker.evaluate(
+    async () => (await chrome.windows.getLastFocused()).id!,
+  );
+  await worker.evaluate(
+    (id) => chrome.windows.update(id, { state: 'normal' }),
+    windowId,
+  );
+  const control = await context.newPage();
+  await control.goto(`chrome-extension://${extensionId}/newtab.html`);
+  await page.bringToFront();
+  await inspectOverlay(page);
+  const ui = page.locator('sidekick=.sidekick-root');
+  const sidebar = ui.getByRole('complementary', { includeHidden: true });
+  await ui.getByRole('button', { name: 'Open Sidekick', exact: true }).click();
+  await ui
+    .getByRole('button', { name: 'Enter Immersive', exact: true })
+    .click();
+  await expect
+    .poll(() =>
+      worker.evaluate(
+        (id) => chrome.windows.get(id).then((w) => w.state),
+        windowId,
+      ),
+    )
+    .toBe('fullscreen');
+  await expect(
+    ui.getByRole('button', { name: 'Exit Immersive', exact: true }),
+  ).toBeVisible();
+  await ui.getByRole('button', { name: 'Collapse sidebar' }).click();
+  await page.mouse.move(800, 500);
+  await expect(sidebar).toBeHidden();
+  await page.mouse.move(3, 500);
+  await expect(sidebar).toBeVisible();
+  const fullWidth = await page.evaluate(() => innerWidth);
+  const body = await page.evaluate(() => ({
+    margin: getComputedStyle(document.body).margin,
+    padding: getComputedStyle(document.body).padding,
+  }));
+  await ui.getByRole('button', { name: 'Pin sidebar', exact: true }).click();
+  await expect(sidebar).toBeHidden();
+  await expect
+    .poll(() => page.evaluate(() => innerWidth))
+    .toBeLessThan(fullWidth);
+  const native = await attachNativePanel(
+    context,
+    `chrome-extension://${extensionId}/sidepanel.html`,
+  );
+  await expect
+    .poll(() =>
+      native.evaluate(
+        `!!Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Exit Immersive')`,
+      ),
+    )
+    .toBe(true);
+  expect(
+    await page.evaluate(() => ({
+      margin: getComputedStyle(document.body).margin,
+      padding: getComputedStyle(document.body).padding,
+    })),
+  ).toEqual(body);
+  const restricted = await context.newPage();
+  await restricted.goto('chrome://version');
+  await expect(restricted.locator('sidekick-sidebar')).toHaveCount(0);
+  expect(
+    await native.evaluate(
+      `!!document.querySelector('input[aria-label="Address or Google search"]')`,
+    ),
+  ).toBe(true);
+  await restricted.close();
+  await page.bringToFront();
+  await native.evaluate(`(() => {
+    const input = document.querySelector('input[aria-label="Address or Google search"]');
+    Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value').set.call(input, ${JSON.stringify(`${origin}/second`)});
+    input.closest('form').requestSubmit();
+  })()`);
+  await expect(page).toHaveURL(`${origin}/second`);
+  await expect
+    .poll(() =>
+      native.evaluate(`document.querySelector('.page-heading')?.textContent`),
+    )
+    .toBe('Second page');
+  const capture = (await native.send('Page.captureScreenshot', {
+    format: 'png',
+  })) as { data: string };
+  await writeFile(
+    'test-results/immersive-native-panel.png',
+    Buffer.from(capture.data, 'base64'),
+  );
+  await page.screenshot({ path: 'test-results/immersive-page.png' });
+  const cdp = await context.browser()!.newBrowserCDPSession();
+  const before = await control.evaluate(
+    async () =>
+      (
+        await chrome.runtime.getContexts({
+          contextTypes: ['BACKGROUND' as chrome.runtime.ContextType],
+        })
+      )[0]?.contextId,
+  );
+  const target = (await cdp.send('Target.getTargets')).targetInfos.find(
+    (t) => t.type === 'service_worker' && t.url.includes(extensionId),
+  )!;
+  await cdp.send('Target.closeTarget', { targetId: target.targetId });
+  await expect
+    .poll(
+      () =>
+        control.evaluate(async (previous) => {
+          const id = (
+            await chrome.runtime.getContexts({
+              contextTypes: ['BACKGROUND' as chrome.runtime.ContextType],
+            })
+          )[0]?.contextId;
+          return !!id && id !== previous;
+        }, before),
+      { timeout: 20000 },
+    )
+    .toBe(true);
+  await native.evaluate(
+    `Array.from(document.querySelectorAll('button')).find(b => b.textContent === 'Exit Immersive').click()`,
+  );
+  await expect
+    .poll(() =>
+      worker.evaluate(
+        (id) => chrome.windows.get(id).then((w) => w.state),
+        windowId,
+      ),
+    )
+    .toBe('normal');
+  await native.evaluate(
+    `document.querySelector('button[aria-label="Unpin to hover sidebar"]').click()`,
+  );
+  await expect
+    .poll(() =>
+      worker.evaluate(
+        async () =>
+          (
+            await chrome.runtime.getContexts({
+              contextTypes: ['SIDE_PANEL' as chrome.runtime.ContextType],
+            })
+          ).length,
+      ),
+    )
+    .toBe(0);
+  await native.dispose();
+  // Restore maximized, then simulate an external/manual browser state change.
+  await worker.evaluate(
+    (id) => chrome.windows.update(id, { state: 'maximized' }),
+    windowId,
+  );
+  await control.evaluate(async (id) => {
+    await chrome.runtime.sendMessage({
+      channel: 'sidekick',
+      windowId: id,
+      command: { type: 'immersive.enter' },
+    });
+  }, windowId);
+  await control.evaluate(async (id) => {
+    await chrome.runtime.sendMessage({
+      channel: 'sidekick',
+      windowId: id,
+      command: { type: 'immersive.exit' },
+    });
+  }, windowId);
+  await expect
+    .poll(() =>
+      worker.evaluate(
+        (id) => chrome.windows.get(id).then((w) => w.state),
+        windowId,
+      ),
+    )
+    .toBe('maximized');
+  await control.evaluate(async (id) => {
+    await chrome.runtime.sendMessage({
+      channel: 'sidekick',
+      windowId: id,
+      command: { type: 'immersive.enter' },
+    });
+  }, windowId);
+  await page.keyboard.press('F11');
+  // CDP key injection does not reliably trigger browser accelerators. Record
+  // the physical-key limitation, then verify the same external state event.
+  await page.waitForTimeout(500);
+  const f11Worked = await worker.evaluate(
+    (id) => chrome.windows.get(id).then((w) => w.state !== 'fullscreen'),
+    windowId,
+  );
+  console.log(
+    `F11 via Playwright browser accelerator: ${f11Worked ? 'worked' : 'not available; physical F11 remains a manual check'}`,
+  );
+  if (!f11Worked)
+    await worker.evaluate(
+      (id) => chrome.windows.update(id, { state: 'normal' }),
+      windowId,
+    );
+  await expect(
+    control.getByRole('button', { name: 'Enter Immersive', exact: true }),
+  ).toBeVisible();
+  const other = await worker.evaluate(
+    async () =>
+      (await chrome.windows.create({ url: 'about:blank', state: 'normal' }))!
+        .id!,
+  );
+  await control.evaluate(async (id) => {
+    await chrome.runtime.sendMessage({
+      channel: 'sidekick',
+      windowId: id,
+      command: { type: 'immersive.enter' },
+    });
+  }, windowId);
+  expect(
+    await worker.evaluate(
+      (id) => chrome.windows.get(id).then((w) => w.state),
+      other,
+    ),
+  ).toBe('normal');
+  await control.evaluate(async (id) => {
+    await chrome.runtime.sendMessage({
+      channel: 'sidekick',
+      windowId: id,
+      command: { type: 'immersive.exit' },
+    });
+  }, windowId);
+  await worker.evaluate((id) => chrome.windows.remove(id), other);
+  await worker.evaluate(
+    (id) => chrome.windows.update(id, { state: 'normal' }),
+    windowId,
+  );
+  await cdp.detach();
+  await control.close();
+  await page.close();
 });
 test.afterAll(async () => {
   await context?.close();

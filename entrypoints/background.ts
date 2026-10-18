@@ -9,6 +9,10 @@ import {
 import { toTabItem, type TabItem } from '../lib/tabs';
 import { WindowStateRepository } from '../lib/window-state';
 import { PanelService } from '../lib/panel-service';
+import { ImmersiveController } from '../lib/immersive';
+import { NavigationService, safeUrl } from '../lib/navigation';
+import { readBookmarks } from '../lib/bookmarks';
+import { isRestrictedUrl } from '../lib/tabs';
 
 export default defineBackground(() => {
   const repository = new MetadataRepository(chrome.storage.local);
@@ -17,6 +21,10 @@ export default defineBackground(() => {
   });
   const clients = new Map<chrome.runtime.Port, number>();
   const windows = new WindowStateRepository(chrome.storage.session);
+  const immersive = new ImmersiveController(chrome.windows, windows, () => {
+    void refresh();
+  });
+  const navigation = new NavigationService();
   const panels = new PanelService(
     {
       open: (options) => chrome.sidePanel.open(options),
@@ -136,6 +144,10 @@ export default defineBackground(() => {
         ('windowId' in message ? message.windowId : undefined);
       if (typeof id !== 'number' || !Number.isInteger(id) || id < 0) return;
       clients.set(port, id);
+      void immersive
+        .synchronize(id)
+        .then(() => refresh())
+        .catch(report);
       const documentId = port.sender?.documentId;
       if (
         documentId &&
@@ -251,6 +263,44 @@ export default defineBackground(() => {
             throw new Error('Browser window is unavailable.');
           const c = request.command;
           switch (c.type) {
+            case 'immersive.enter':
+              await immersive.enter(windowId);
+              break;
+            case 'immersive.exit':
+              await immersive.exit(windowId);
+              break;
+            case 'navigation.go':
+              await navigation.navigate(windowId, c.input, c.newTab);
+              break;
+            case 'navigation.action':
+              await navigation.action(windowId, c.action);
+              break;
+            case 'bookmarks.read':
+              respond({ ok: true, bookmarks: await readBookmarks(c.query) });
+              return;
+            case 'favorite.save': {
+              const metadata = await repository.get();
+              const existing = metadata.favorites.find((f) => f.id === c.id);
+              if (c.id && (!existing || existing.workspaceId !== c.workspaceId))
+                throw new Error(
+                  'Shortcut is no longer available in this workspace.',
+                );
+              await repository.saveFavorite({
+                id: c.id ?? crypto.randomUUID(),
+                workspaceId: c.workspaceId,
+                title: c.title.trim(),
+                url: safeUrl(c.url.trim()),
+                order:
+                  existing?.order ??
+                  metadata.favorites.filter(
+                    (f) => f.workspaceId === c.workspaceId,
+                  ).length,
+              });
+              break;
+            }
+            case 'favorite.remove':
+              await repository.removeFavorite(c.id);
+              break;
             case 'tab.activate':
             case 'tab.close': {
               const tab = await chrome.tabs.get(c.tabId);
@@ -321,10 +371,62 @@ export default defineBackground(() => {
   chrome.windows.onRemoved.addListener((id) => {
     void windows.remove(id).catch(report);
   });
+  chrome.windows.onBoundsChanged.addListener((window) => {
+    if (window.id !== undefined)
+      void immersive.synchronize(window.id).catch(report);
+  });
+  chrome.windows.onFocusChanged.addListener((id) => {
+    if (id >= 0) void immersive.synchronize(id).catch(report);
+  });
+  chrome.commands.onCommand.addListener((command, tab) => {
+    if (tab?.windowId === undefined) return;
+    if (command === 'exit-immersive') {
+      void immersive.exit(tab.windowId).catch(report);
+      return;
+    }
+    if (command !== 'focus-address' && command !== 'show-sidebar') return;
+    const panelPorts = [...panelClients].filter(
+      ([, info]) => info.windowId === tab.windowId,
+    );
+    if (panelPorts.length) {
+      for (const [port] of panelPorts)
+        send(port, { type: 'focus', address: command === 'focus-address' });
+      return;
+    }
+    const dashboard = [...clients.keys()].find(
+      (port) =>
+        port.sender?.tab?.id === tab.id &&
+        port.sender?.url === chrome.runtime.getURL('newtab.html'),
+    );
+    if (dashboard) {
+      send(dashboard, { type: 'focus', address: command === 'focus-address' });
+      return;
+    }
+    // Restricted pages cannot receive content scripts. Open Chrome's panel in
+    // the command's gesture, before any awaits. It contains the same controls.
+    if (isRestrictedUrl(tab.url ?? '')) {
+      void panels.pin(tab.windowId).catch(report);
+      return;
+    }
+    if (tab.id !== undefined)
+      void chrome.tabs
+        .sendMessage(tab.id, { channel: 'sidekick:page', action: command })
+        .catch(report);
+  });
   chrome.storage.onChanged.addListener((_changes, area) => {
     if (area === 'local') changed();
   });
   const initialize = () => {
+    void chrome.windows
+      .getAll()
+      .then((all) =>
+        Promise.all(
+          all
+            .filter((w) => w.id !== undefined)
+            .map((w) => immersive.synchronize(w.id!)),
+        ),
+      )
+      .catch(report);
     void ready
       .then(() => repository.get())
       .catch((error: unknown) =>

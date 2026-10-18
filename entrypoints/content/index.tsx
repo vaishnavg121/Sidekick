@@ -2,6 +2,7 @@ import '../../ui/style.css';
 import { createRoot } from 'react-dom/client';
 import { Sidebar } from '../../ui/Sidebar';
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
+import { focusAddress, pageControls } from '../../lib/page-controls';
 
 export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
@@ -10,8 +11,46 @@ export default defineContentScript({
     'https://chrome.google.com/webstore/*',
   ],
   cssInjectionMode: 'ui',
-  runAt: 'document_idle',
+  runAt: 'document_start',
   async main(ctx) {
+    const control = (
+      message: unknown,
+      sender: chrome.runtime.MessageSender,
+      respond: (result: { ok: boolean }) => void,
+    ) => {
+      if (
+        sender.id !== chrome.runtime.id ||
+        !message ||
+        typeof message !== 'object' ||
+        !('channel' in message) ||
+        message.channel !== 'sidekick:page' ||
+        !('action' in message)
+      )
+        return;
+      if (message.action === 'stop') window.stop();
+      else if (message.action === 'focus-address') focusAddress();
+      else if (message.action === 'show-sidebar')
+        pageControls.dispatchEvent(new Event('reveal'));
+      else return;
+      respond({ ok: true });
+    };
+    chrome.runtime.onMessage.addListener(control);
+    ctx.onInvalidated(() => chrome.runtime.onMessage.removeListener(control));
+    if (!document.documentElement)
+      await new Promise<void>((done) => {
+        const observer = new MutationObserver(() => {
+          if (document.documentElement || ctx.isInvalid) {
+            observer.disconnect();
+            done();
+          }
+        });
+        observer.observe(document, { childList: true });
+        ctx.onInvalidated(() => {
+          observer.disconnect();
+          done();
+        });
+      });
+    if (ctx.isInvalid) return;
     const ui = await createShadowRootUi(ctx, {
       name: 'sidekick-sidebar',
       mode: 'closed',
