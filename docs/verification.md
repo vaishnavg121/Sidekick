@@ -1,6 +1,6 @@
 # Milestone 1 verification
 
-Historical results for `a762b0a` are preserved below. See [Milestone 1.2](milestone-1.2.md) for current immersive behavior and verification, and [Milestone 1.1](milestone-1.1.md) for the preceding hybrid-panel changes. Pinned-overlay and hidden-strip expectations below were superseded in 1.1.
+Historical results for `a762b0a` are preserved below. See [Milestone 1.3](milestone-1.3.md) for current docking, resource and workspace behavior, [Milestone 1.2](milestone-1.2.md) for immersive-mode history, and [Milestone 1.1](milestone-1.1.md) for the preceding hybrid-panel changes. Pinned-overlay and hidden-strip expectations below were superseded in 1.1.
 
 Executed on Windows on 18 October 2026 with Node 24.19.0, pnpm 11.20.0, WXT 0.21.4 and Playwright 1.64.1 / Chrome for Testing 156.0.8078.4.
 

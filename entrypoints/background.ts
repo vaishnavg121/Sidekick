@@ -13,6 +13,7 @@ import { ImmersiveController } from '../lib/immersive';
 import { NavigationService, safeUrl } from '../lib/navigation';
 import { readBookmarks } from '../lib/bookmarks';
 import { isRestrictedUrl } from '../lib/tabs';
+import { ResourceService } from '../lib/resource-service';
 
 export default defineBackground(() => {
   const repository = new MetadataRepository(chrome.storage.local);
@@ -25,6 +26,7 @@ export default defineBackground(() => {
     void refresh();
   });
   const navigation = new NavigationService();
+  const resources = new ResourceService(repository);
   const panels = new PanelService(
     {
       open: (options) => chrome.sidePanel.open(options),
@@ -263,6 +265,17 @@ export default defineBackground(() => {
             throw new Error('Browser window is unavailable.');
           const c = request.command;
           switch (c.type) {
+            case 'resource.save':
+            case 'resource.current':
+            case 'resource.open':
+            case 'resource.remove':
+            case 'resource.move':
+            case 'resource.reorder':
+            case 'workspace.save':
+            case 'folder.save':
+            case 'folder.remove':
+              await resources.handle(c, windowId);
+              break;
             case 'immersive.enter':
               await immersive.enter(windowId);
               break;
@@ -285,16 +298,11 @@ export default defineBackground(() => {
                 throw new Error(
                   'Shortcut is no longer available in this workspace.',
                 );
-              await repository.saveFavorite({
-                id: c.id ?? crypto.randomUUID(),
+              await repository.authorResource('favorite', {
+                ...(c.id ? { id: c.id } : {}),
                 workspaceId: c.workspaceId,
                 title: c.title.trim(),
                 url: safeUrl(c.url.trim()),
-                order:
-                  existing?.order ??
-                  metadata.favorites.filter(
-                    (f) => f.workspaceId === c.workspaceId,
-                  ).length,
               });
               break;
             }

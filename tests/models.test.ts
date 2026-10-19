@@ -7,6 +7,39 @@ import {
 } from '../lib/models';
 import { isMetadata } from '../lib/repository';
 describe('workspace models', () => {
+  it('rejects malformed optional resource fields without silently repairing data', () => {
+    const m = createMetadata();
+    expect(
+      isMetadata({
+        ...m,
+        favorites: [
+          {
+            id: 'f',
+            workspaceId: m.activeWorkspaceId,
+            title: 'Bad icon',
+            url: 'https://example.com',
+            order: 0,
+            favicon: 42,
+          },
+        ],
+      }),
+    ).toBe(false);
+    expect(
+      isMetadata({
+        ...m,
+        folders: [
+          {
+            id: 'folder',
+            workspaceId: m.activeWorkspaceId,
+            name: 'Folder',
+            parentId: null,
+            order: 0,
+            collapsed: 'yes',
+          },
+        ],
+      }),
+    ).toBe(false);
+  });
   it('creates durable unique workspace identities and no browser handles', () => {
     const first = createMetadata();
     expect(first.activeWorkspaceId).toBe(first.workspaces[0]?.id);
@@ -25,7 +58,7 @@ describe('workspace models', () => {
     expect(
       normalizePreferences({ mode: 'broken' as 'hover', width: Infinity })
         .width,
-    ).toBe(300);
+    ).toBe(320);
   });
   it('rejects cycles, missing parents and cross-workspace folder nesting', () => {
     const folder = (

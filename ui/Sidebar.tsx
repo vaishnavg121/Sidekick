@@ -12,6 +12,9 @@ import { WorkspaceSelector } from './WorkspaceSelector';
 import { Favorites } from './Favorites';
 import { Bookmarks } from './Bookmarks';
 import { pageControls } from '../lib/page-controls';
+import { Pinned } from './Pinned';
+import { useTheme } from './theme';
+import { allowDrag, readDrag, startDrag } from './drag';
 
 function TabRow({
   tab,
@@ -25,7 +28,17 @@ function TabRow({
       ? tab.favicon
       : undefined;
   return (
-    <li className={`tab-row ${tab.active ? 'active' : ''}`}>
+    <li
+      className={`tab-row ${tab.active ? 'active' : ''}`}
+      draggable
+      onDragStart={(event) =>
+        startDrag(event, {
+          kind: 'tab',
+          id: String(tab.id),
+          workspaceId: useSidebar.getState().metadata?.activeWorkspaceId ?? '',
+        })
+      }
+    >
       <button
         className="tab-activate"
         aria-current={tab.active ? 'page' : undefined}
@@ -66,8 +79,15 @@ function TabRow({
   );
 }
 
-export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
+export function Sidebar({
+  nativePanel,
+  embedded = false,
+}: {
+  nativePanel: boolean;
+  embedded?: boolean;
+}) {
   const state = useSidebar();
+  const theme = useTheme();
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinPending, setPinPending] = useState(false);
@@ -105,14 +125,21 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
       }, useSidebar.getState().setConnected),
   );
   useEffect(() => {
-    void client.start(nativePanel);
+    void client.start(nativePanel || embedded);
     return () => {
       hover.cancel();
       client.dispose();
     };
-  }, [client, hover, nativePanel]);
+  }, [client, hover, nativePanel, embedded]);
   useEffect(() => {
     const reveal = () => {
+      if (
+        embedded &&
+        useSidebar.getState().metadata?.preferences.mode === 'hidden'
+      )
+        void client
+          .command({ type: 'sidebar.mode', mode: 'hover' })
+          .catch((e: Error) => useSidebar.getState().setError(e.message));
       hover.cancel();
       hover.requestReveal();
       setForcedReveal(true);
@@ -124,19 +151,33 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
       pageControls.removeEventListener('address', reveal);
       pageControls.removeEventListener('reveal', reveal);
     };
-  }, [hover]);
+  }, [hover, embedded, client]);
   const preferences = state.metadata?.preferences ?? DEFAULT_PREFERENCES;
   const effectiveMode =
-    state.windowState.immersive && preferences.mode === 'hidden'
+    preferences.mode === 'docked' && !state.dockStatus.active && !embedded
       ? 'hover'
-      : preferences.mode;
+      : !embedded &&
+          state.windowState.immersive &&
+          preferences.mode === 'hidden'
+        ? 'hover'
+        : preferences.mode;
   const visible =
     nativePanel ||
-    (!pinPending &&
+    (embedded && preferences.mode !== 'hidden') ||
+    (preferences.mode === 'docked' && state.dockStatus.active) ||
+    (!embedded &&
+      !pinPending &&
       !state.windowState.nativePanelOpen &&
       (effectiveMode === 'hover' || forcedReveal) &&
       (open || focused));
-  const tabs = searchTabs(state.tabs, state.query);
+  const pinnedUrls = new Set(
+    state.metadata?.pinnedEntries
+      .filter((e) => e.workspaceId === state.metadata?.activeWorkspaceId)
+      .map((e) => e.url),
+  );
+  const tabs = searchTabs(state.tabs, state.query).filter(
+    (tab) => !pinnedUrls.has(tab.url),
+  );
   const run = (command: Command) => {
     state.setError(undefined);
     const pinning =
@@ -185,43 +226,48 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
   };
   return (
     <div
-      className={`sidekick-root ${nativePanel ? 'native' : 'overlay'}`}
+      className={`sidekick-root ${embedded ? 'embedded' : nativePanel ? 'native' : state.dockStatus.active ? 'docked' : 'overlay'}`}
+      data-theme={theme}
       style={{ '--sidebar-width': `${preferences.width}px` } as CSSProperties}
     >
-      {!nativePanel && !pinPending && !state.windowState.nativePanelOpen && (
-        <button
-          className="edge-strip"
-          aria-label={
-            effectiveMode === 'pinned'
-              ? 'Open pinned Sidekick'
-              : 'Open Sidekick'
-          }
-          aria-expanded={visible}
-          onPointerEnter={() => {
-            if (effectiveMode === 'hover') hover.enter(preferences.openDelay);
-          }}
-          onPointerLeave={() => {
-            hover.cancelReveal();
-            hover.leave(preferences.closeDelay);
-          }}
-          onFocus={() => {
-            if (effectiveMode === 'hover') setOpen(true);
-          }}
-          onClick={() => {
-            hover.cancel();
-            if (effectiveMode === 'pinned') run({ type: 'panel.pin' });
-            else {
-              if (effectiveMode === 'hidden') {
-                hover.requestReveal();
-                run({ type: 'sidebar.mode', mode: 'hover' });
-              }
-              setOpen(true);
+      {!nativePanel &&
+        (!embedded || preferences.mode === 'hidden') &&
+        !state.dockStatus.active &&
+        !pinPending &&
+        !state.windowState.nativePanelOpen && (
+          <button
+            className="edge-strip"
+            aria-label={
+              effectiveMode === 'pinned'
+                ? 'Open pinned Sidekick'
+                : 'Open Sidekick'
             }
-          }}
-        >
-          <span />
-        </button>
-      )}
+            aria-expanded={visible}
+            onPointerEnter={() => {
+              if (effectiveMode === 'hover') hover.enter(preferences.openDelay);
+            }}
+            onPointerLeave={() => {
+              hover.cancelReveal();
+              hover.leave(preferences.closeDelay);
+            }}
+            onFocus={() => {
+              if (effectiveMode === 'hover') setOpen(true);
+            }}
+            onClick={() => {
+              hover.cancel();
+              if (effectiveMode === 'pinned') run({ type: 'panel.pin' });
+              else {
+                if (effectiveMode === 'hidden') {
+                  hover.requestReveal();
+                  run({ type: 'sidebar.mode', mode: 'hover' });
+                }
+                setOpen(true);
+              }
+            }}
+          >
+            <span />
+          </button>
+        )}
       {!nativePanel && !visible && state.error && (
         <div className="edge-error" role="alert">
           {state.error}
@@ -240,7 +286,43 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
           </button>
         </div>
       )}
+      {!nativePanel &&
+        !embedded &&
+        !visible &&
+        preferences.mode === 'docked' &&
+        state.dockStatus.reason && (
+          <div className="edge-error" role="status">
+            {state.dockStatus.reason}
+            <button
+              className="text-button"
+              onClick={() => run({ type: 'sidebar.mode', mode: 'hover' })}
+            >
+              Use Hover overlay
+            </button>
+            <button
+              className="text-button"
+              onClick={() =>
+                pageControls.dispatchEvent(new Event('retry-dock'))
+              }
+            >
+              Retry docking
+            </button>
+          </div>
+        )}
       <aside
+        onDragEnd={(event) =>
+          event.currentTarget
+            .querySelectorAll('.drop-ready')
+            .forEach((node) => node.classList.remove('drop-ready'))
+        }
+        onDragLeaveCapture={(event) => {
+          const target = event.target as HTMLElement;
+          if (!event.currentTarget.contains(event.relatedTarget as Node | null))
+            event.currentTarget
+              .querySelectorAll('.drop-ready')
+              .forEach((node) => node.classList.remove('drop-ready'));
+          else target.classList.remove('drop-ready');
+        }}
         className={`sidebar ${visible ? 'is-visible' : ''}`}
         aria-label="Sidekick sidebar"
         inert={!visible}
@@ -259,7 +341,12 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
           }
         }}
         onKeyDown={(event) => {
-          if (event.key === 'Escape' && !nativePanel) {
+          if (
+            event.key === 'Escape' &&
+            !nativePanel &&
+            !embedded &&
+            !state.dockStatus.active
+          ) {
             (event.target as HTMLElement).blur();
             collapse();
           }
@@ -275,41 +362,87 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
             </span>
           </div>
           <div className="header-actions">
+            {!nativePanel && !embedded && (
+              <button
+                className="icon-button"
+                aria-label="Open native fallback"
+                title="Chrome panel · restricted-page fallback"
+                onClick={() => run({ type: 'panel.pin' })}
+              >
+                <Icon name="globe" size={14} />
+              </button>
+            )}
             <button
               className="icon-button"
               aria-label={
-                nativePanel ? 'Unpin to hover sidebar' : 'Pin sidebar'
+                nativePanel
+                  ? 'Unpin to hover sidebar'
+                  : embedded
+                    ? 'Hide sidebar'
+                    : state.dockStatus.active
+                      ? 'Undock sidebar'
+                      : 'Dock sidebar'
               }
               title={
                 nativePanel
                   ? 'Return to hover overlay'
-                  : 'Pin in Chrome side panel'
+                  : 'Dock the custom sidebar on the left'
               }
               disabled={!state.connected}
               onClick={() =>
                 run(
                   nativePanel
                     ? { type: 'sidebar.mode', mode: 'hover' }
-                    : { type: 'panel.pin' },
+                    : embedded
+                      ? { type: 'sidebar.mode', mode: 'hidden' }
+                      : {
+                          type: 'sidebar.mode',
+                          mode: state.dockStatus.active ? 'hover' : 'docked',
+                        },
                 )
               }
             >
               <Icon name="pin" />
             </button>
-            {!nativePanel && (
+            {!nativePanel && !embedded && (
               <button
                 className="icon-button"
                 aria-label="Collapse sidebar"
-                onClick={collapse}
+                onClick={() => {
+                  if (state.dockStatus.active)
+                    run({ type: 'sidebar.mode', mode: 'hidden' });
+                  else collapse();
+                }}
               >
                 <Icon name="collapse" />
               </button>
             )}
           </div>
         </header>
-        <WorkspaceSelector run={run} />
+        <WorkspaceSelector run={run} client={client} />
         <ImmersiveControls client={client} />
         <Navigation client={client} visible={visible} />
+        {!embedded &&
+          preferences.mode === 'docked' &&
+          state.dockStatus.reason && (
+            <div className="dock-notice" role="status">
+              {state.dockStatus.reason}
+              <button
+                className="text-button"
+                onClick={() => run({ type: 'sidebar.mode', mode: 'hover' })}
+              >
+                Use Hover overlay
+              </button>
+              <button
+                className="text-button"
+                onClick={() =>
+                  pageControls.dispatchEvent(new Event('retry-dock'))
+                }
+              >
+                Retry docking
+              </button>
+            </div>
+          )}
         {state.error && (
           <div role="alert" className="error-message">
             {state.error}
@@ -359,10 +492,45 @@ export function Sidebar({ nativePanel }: { nativePanel: boolean }) {
               )}
             </div>
             <div className="scroll-area">
-              {!state.query && <Favorites client={client} />}
-              <section className="tabs-section">
+              {!state.query && (
+                <>
+                  <Favorites
+                    key={'fav:' + state.metadata?.activeWorkspaceId}
+                    client={client}
+                  />
+                  <Pinned
+                    key={'pin:' + state.metadata?.activeWorkspaceId}
+                    client={client}
+                  />
+                </>
+              )}
+              <section
+                className="tabs-section today-drop"
+                aria-label="Today tabs"
+                onDragOver={allowDrag}
+                onDrop={(event) => {
+                  const item = readDrag(event);
+                  if (item?.kind === 'pinned') {
+                    event.preventDefault();
+                    void client
+                      .command({
+                        type: 'resource.open',
+                        kind: 'pinned',
+                        id: item.id,
+                      })
+                      .then(() =>
+                        client.command({
+                          type: 'resource.remove',
+                          kind: 'pinned',
+                          id: item.id,
+                        }),
+                      )
+                      .catch((e: Error) => state.setError(e.message));
+                  }
+                }}
+              >
                 <div className="section-label">
-                  {state.query ? 'SEARCH RESULTS' : 'OPEN TABS'}
+                  {state.query ? 'SEARCH RESULTS' : 'TODAY'}
                   <span className="tab-count">
                     {state.query
                       ? `${tabs.length} / ${state.tabs.length}`

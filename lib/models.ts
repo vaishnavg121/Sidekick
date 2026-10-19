@@ -1,4 +1,6 @@
-export type SidebarMode = 'hidden' | 'hover' | 'pinned';
+export type SidebarMode = 'hidden' | 'hover' | 'docked' | 'pinned';
+export type Theme = 'dark' | 'light' | 'system';
+export type ResourceKind = 'favorite' | 'pinned';
 export interface SidebarPreferences {
   mode: SidebarMode;
   width: number;
@@ -11,6 +13,8 @@ export interface Workspace {
   color: string;
   createdAt: string;
   preferredEmail?: string;
+  icon?: string;
+  theme?: Theme;
 }
 export interface WorkspaceFavorite {
   id: string;
@@ -18,6 +22,7 @@ export interface WorkspaceFavorite {
   title: string;
   url: string;
   order: number;
+  favicon?: string;
 }
 export interface PinnedEntry extends WorkspaceFavorite {
   folderId: string | null;
@@ -28,9 +33,11 @@ export interface Folder {
   parentId: string | null;
   name: string;
   order: number;
+  collapsed?: boolean;
 }
 export interface Metadata {
   version: 1;
+  layoutVersion?: 2;
   workspaces: Workspace[];
   activeWorkspaceId: string;
   favorites: WorkspaceFavorite[];
@@ -59,7 +66,7 @@ export interface SecretProvider {
 }
 export const DEFAULT_PREFERENCES: SidebarPreferences = {
   mode: 'hover',
-  width: 300,
+  width: 320,
   openDelay: 180,
   closeDelay: 350,
 };
@@ -71,10 +78,10 @@ export function normalizePreferences(
       ? Math.round(Math.min(max, Math.max(min, n)))
       : fallback;
   return {
-    mode: ['hidden', 'hover', 'pinned'].includes(value.mode ?? '')
+    mode: ['hidden', 'hover', 'docked', 'pinned'].includes(value.mode ?? '')
       ? value.mode!
       : 'hover',
-    width: clamp(value.width, 240, 440, 300),
+    width: clamp(value.width, 240, 440, 320),
     openDelay: clamp(value.openDelay, 0, 1500, 180),
     closeDelay: clamp(value.closeDelay, 100, 2000, 350),
   };
@@ -88,6 +95,7 @@ export function createMetadata(): Metadata {
   };
   return {
     version: 1,
+    layoutVersion: 2,
     workspaces: [workspace],
     activeWorkspaceId: workspace.id,
     favorites: [],

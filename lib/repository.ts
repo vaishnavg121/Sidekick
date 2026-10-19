@@ -9,7 +9,13 @@ import {
   type WorkspaceFavorite,
   type PinnedEntry,
   type Folder,
+  type ResourceKind,
 } from './models';
+import {
+  saveResource,
+  reorderResources,
+  type ResourceInput,
+} from './resources';
 
 export interface StorageArea {
   get(key: string): Promise<Record<string, unknown>>;
@@ -21,6 +27,7 @@ export function isMetadata(value: unknown): value is Metadata {
   const m = value as Metadata;
   if (
     m.version !== 1 ||
+    (m.layoutVersion !== undefined && m.layoutVersion !== 2) ||
     !Array.isArray(m.workspaces) ||
     !m.workspaces.length ||
     !m.preferences ||
@@ -35,6 +42,10 @@ export function isMetadata(value: unknown): value is Metadata {
         typeof w.name === 'string' &&
         typeof w.color === 'string' &&
         typeof w.createdAt === 'string' &&
+        (w.icon === undefined ||
+          (typeof w.icon === 'string' && w.icon.length <= 12)) &&
+        (w.theme === undefined ||
+          ['dark', 'light', 'system'].includes(w.theme)) &&
         (w.preferredEmail === undefined ||
           typeof w.preferredEmail === 'string'),
     )
@@ -54,8 +65,14 @@ export function isMetadata(value: unknown): value is Metadata {
         ids.has(e.workspaceId) &&
         typeof e.title === 'string' &&
         typeof e.url === 'string' &&
-        Number.isFinite(e.order),
+        Number.isFinite(e.order) &&
+        (e.favicon === undefined || typeof e.favicon === 'string'),
     )
+  )
+    return false;
+  if (
+    new Set(m.favorites.map((e) => e.id)).size !== m.favorites.length ||
+    new Set(m.pinnedEntries.map((e) => e.id)).size !== m.pinnedEntries.length
   )
     return false;
   if (
@@ -66,7 +83,8 @@ export function isMetadata(value: unknown): value is Metadata {
         typeof f.name === 'string' &&
         typeof f.workspaceId === 'string' &&
         (f.parentId === null || typeof f.parentId === 'string') &&
-        Number.isFinite(f.order),
+        Number.isFinite(f.order) &&
+        (f.collapsed === undefined || typeof f.collapsed === 'boolean'),
     )
   )
     return false;
@@ -99,6 +117,21 @@ export class MetadataRepository {
       throw new Error(
         'Workspace data could not be read. Existing data was preserved.',
       );
+    if (value.layoutVersion === undefined) {
+      const migrated: Metadata = {
+        ...value,
+        layoutVersion: 2,
+        preferences: normalizePreferences({
+          ...value.preferences,
+          mode:
+            value.preferences.mode === 'pinned'
+              ? 'docked'
+              : value.preferences.mode,
+        }),
+      };
+      await this.area.set({ [METADATA_KEY]: migrated });
+      return migrated;
+    }
     return { ...value, preferences: normalizePreferences(value.preferences) };
   }
   get(): Promise<Metadata> {
@@ -136,6 +169,112 @@ export class MetadataRepository {
       ...m,
       favorites: m.favorites.filter((f) => f.id !== id),
     }));
+  }
+  authorResource(kind: ResourceKind, input: ResourceInput): Promise<Metadata> {
+    return this.update((m) => saveResource(m, kind, input));
+  }
+  removeResource(kind: ResourceKind, id: string): Promise<Metadata> {
+    return this.update((m) => ({
+      ...m,
+      [kind === 'favorite' ? 'favorites' : 'pinnedEntries']: (kind ===
+      'favorite'
+        ? m.favorites
+        : m.pinnedEntries
+      ).filter((e) => e.id !== id),
+    }));
+  }
+  moveResource(
+    kind: ResourceKind,
+    id: string,
+    workspaceId: string,
+    folderId: string | null,
+  ): Promise<Metadata> {
+    return this.update((m) => {
+      const entry = (kind === 'favorite' ? m.favorites : m.pinnedEntries).find(
+        (e) => e.id === id,
+      );
+      if (!entry) throw new Error('Entry no longer exists.');
+      return saveResource(m, kind, { ...entry, workspaceId, folderId });
+    });
+  }
+  reorder(
+    kind: ResourceKind,
+    workspaceId: string,
+    ids: string[],
+    folderId: string | null,
+  ): Promise<Metadata> {
+    return this.update((m) =>
+      reorderResources(m, kind, workspaceId, ids, folderId),
+    );
+  }
+  authorWorkspace(input: {
+    id?: string;
+    name: string;
+    color: string;
+    icon: string;
+    theme: 'dark' | 'light' | 'system';
+    preferredEmail: string;
+  }): Promise<Metadata> {
+    return this.update((m) => {
+      const existing = m.workspaces.find((w) => w.id === input.id);
+      if (input.id && !existing) throw new Error('Workspace no longer exists.');
+      const name = input.name.trim();
+      if (!name || name.length > 60 || !/^#[\da-f]{6}$/i.test(input.color))
+        throw new Error('Enter a name and a valid color.');
+      const workspace: Workspace = {
+        id: existing?.id ?? crypto.randomUUID(),
+        createdAt: existing?.createdAt ?? new Date().toISOString(),
+        name,
+        color: input.color,
+        icon: input.icon,
+        theme: input.theme,
+        preferredEmail: input.preferredEmail.trim(),
+      };
+      return {
+        ...m,
+        activeWorkspaceId: workspace.id,
+        workspaces: upsert(m.workspaces, workspace),
+      };
+    });
+  }
+  authorFolder(input: {
+    id?: string;
+    workspaceId: string;
+    parentId: string | null;
+    name: string;
+    collapsed?: boolean;
+  }): Promise<Metadata> {
+    return this.update((m) => {
+      const old = m.folders.find((f) => f.id === input.id);
+      if (input.id && (!old || old.workspaceId !== input.workspaceId))
+        throw new Error('Folder no longer exists.');
+      const name = input.name.trim();
+      if (!name || name.length > 80) throw new Error('Enter a folder name.');
+      const folder: Folder = {
+        ...old,
+        workspaceId: input.workspaceId,
+        parentId: input.parentId,
+        ...(input.collapsed === undefined
+          ? {}
+          : { collapsed: input.collapsed }),
+        id: old?.id ?? crypto.randomUUID(),
+        name,
+        order: old?.order ?? m.folders.length,
+      };
+      return { ...m, folders: upsert(m.folders, folder) };
+    });
+  }
+  removeFolder(id: string): Promise<Metadata> {
+    return this.update((m) => {
+      if (
+        m.pinnedEntries.some((e) => e.folderId === id) ||
+        m.folders.some((f) => f.parentId === id)
+      )
+        throw new Error(
+          'Move this folder’s entries and subfolders before removing it.',
+        );
+      return { ...m, folders: m.folders.filter((f) => f.id !== id) };
+    });
   }
   savePinnedEntry(entry: PinnedEntry): Promise<Metadata> {
     return this.update((m) => ({

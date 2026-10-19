@@ -10,7 +10,7 @@ export default defineConfig({
     {
       name: 'chrome-headed',
       use: { headless: false },
-      grep: /Pin opens|Immersive/,
+      grep: /Pin opens|Immersive|Docking visual/,
     },
   ],
 });
