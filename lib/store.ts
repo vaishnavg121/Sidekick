@@ -3,6 +3,7 @@ import type { Metadata } from './models';
 import { tabReducer, type TabItem } from './tabs';
 import type { ServerEvent } from './protocol';
 import { EMPTY_WINDOW_STATE, type WindowUiState } from './window-state';
+import type { DockStatus } from './docking';
 interface UiState {
   metadata?: Metadata;
   tabs: TabItem[];
@@ -11,6 +12,8 @@ interface UiState {
   connected: boolean;
   error?: string;
   windowState: WindowUiState;
+  dockStatus: DockStatus;
+  setDockStatus(status: DockStatus): void;
   receive(event: ServerEvent): void;
   setQuery(query: string): void;
   setSettings(settings: boolean): void;
@@ -23,6 +26,8 @@ export const useSidebar = create<UiState>((set) => ({
   settings: false,
   connected: false,
   windowState: { ...EMPTY_WINDOW_STATE },
+  dockStatus: { active: false, width: 0 },
+  setDockStatus: (dockStatus) => set({ dockStatus }),
   receive: (event) =>
     event.type === 'focus'
       ? undefined

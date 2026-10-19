@@ -3,6 +3,8 @@ import { createRoot } from 'react-dom/client';
 import { Sidebar } from '../../ui/Sidebar';
 import { createShadowRootUi } from 'wxt/utils/content-script-ui/shadow-root';
 import { focusAddress, pageControls } from '../../lib/page-controls';
+import { DockingController } from '../../lib/docking';
+import { useSidebar } from '../../lib/store';
 
 export default defineContentScript({
   matches: ['http://*/*', 'https://*/*'],
@@ -51,6 +53,31 @@ export default defineContentScript({
         });
       });
     if (ctx.isInvalid) return;
+    const layout = new DockingController((status) =>
+      useSidebar.getState().setDockStatus(status),
+    );
+    const retryDock = () => layout.retry();
+    pageControls.addEventListener('retry-dock', retryDock);
+    const applyLayout = () => {
+      const state = useSidebar.getState();
+      if (
+        state.metadata?.preferences.mode === 'docked' &&
+        !state.windowState.nativePanelOpen
+      )
+        layout.dock(state.metadata.preferences.width);
+      else layout.undock();
+    };
+    const unsubscribe = useSidebar.subscribe((state, previous) => {
+      if (
+        state.metadata?.preferences.mode !==
+          previous.metadata?.preferences.mode ||
+        state.metadata?.preferences.width !==
+          previous.metadata?.preferences.width ||
+        state.windowState.nativePanelOpen !==
+          previous.windowState.nativePanelOpen
+      )
+        applyLayout();
+    });
     const ui = await createShadowRootUi(ctx, {
       name: 'sidekick-sidebar',
       mode: 'closed',
@@ -66,6 +93,12 @@ export default defineContentScript({
         'pointerdown',
         'pointerup',
         'contextmenu',
+        'dragstart',
+        'dragend',
+        'dragenter',
+        'dragleave',
+        'dragover',
+        'drop',
       ],
       onMount(container, _shadow, host) {
         // The host is outside body stacking/containing blocks. Only our own
@@ -98,6 +131,14 @@ export default defineContentScript({
     });
     if (ctx.isInvalid) return;
     ui.mount();
+    applyLayout();
+    const invalidate = () => {
+      unsubscribe();
+      layout.undock();
+      observer.disconnect();
+      ui.remove();
+    };
+    pageControls.addEventListener('invalidated', invalidate);
     let observedRoot = document.documentElement;
     // Watch only document/root children. Body replacement leaves this host
     // intact; document-element replacement and host removal trigger remounting.
@@ -120,6 +161,10 @@ export default defineContentScript({
     }
     observe();
     ctx.onInvalidated(() => {
+      unsubscribe();
+      pageControls.removeEventListener('retry-dock', retryDock);
+      pageControls.removeEventListener('invalidated', invalidate);
+      layout.undock();
       observer.disconnect();
       ui.remove();
     });

@@ -23,16 +23,18 @@ export function Settings({
       >
         <option value="hidden">Hidden</option>
         <option value="hover">Hover overlay</option>
-        <option value="pinned">Pinned · Chrome side panel</option>
+        <option value="docked">Docked · custom left sidebar</option>
+        <option value="pinned">Native panel · restricted-page fallback</option>
       </select>
       <p className="field-note">
-        Pinned uses Chrome’s own space alongside the page. Drag Chrome’s panel
-        divider to resize it. Hidden keeps a small edge button for reopening
-        Sidekick.
+        Docked keeps Sidekick on the left and adjusts compatible pages. Some
+        apps cannot be safely docked and offer Hover overlay instead. Hidden
+        retains the edge trigger. Chrome’s native panel is a separate fallback
+        for restricted pages.
       </p>
       {(
         [
-          ['width', 'Overlay width', 240, 440, 'px'],
+          ['width', 'Sidebar width', 240, 440, 'px'],
           ['openDelay', 'Hover open delay', 0, 1500, 'ms'],
           ['closeDelay', 'Hover close delay', 100, 2000, 'ms'],
         ] as const

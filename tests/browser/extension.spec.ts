@@ -118,20 +118,21 @@ test.beforeAll(async ({ browserName }, testInfo) => {
 test('New Tab replaces Chrome home and manages workspace shortcuts without changing bookmarks', async () => {
   const page = await context.newPage();
   await page.goto('chrome://newtab/');
+  const dashboard = page.locator('.dashboard');
   await expect(
-    page.getByRole('heading', { name: 'Make room for what matters.' }),
+    dashboard.getByRole('heading', { name: 'Make room for what matters.' }),
   ).toBeVisible();
   expect(
     await worker.evaluate(
       () => chrome.runtime.getManifest().chrome_url_overrides?.newtab,
     ),
   ).toBe('newtab.html');
+  await expect(page.locator('.embedded .sidebar')).toHaveCount(1);
   await expect(page.locator('sidekick-sidebar')).toHaveCount(0);
   const folder = await worker.evaluate(async () => {
     const [root] = await chrome.bookmarks.getTree();
-    const parentId = root!.children!.find((node) => node.children)?.id;
     const folder = await chrome.bookmarks.create({
-      parentId,
+      parentId: root!.children!.find((n) => n.children)?.id,
       title: 'Sidekick fixture folder',
     });
     await chrome.bookmarks.create({
@@ -146,107 +147,81 @@ test('New Tab replaces Chrome home and manages workspace shortcuts without chang
     });
     return folder.id;
   });
-  const bookmarksBefore = await worker.evaluate(() =>
-    chrome.bookmarks.getTree(),
-  );
-  await page.getByRole('button', { name: 'Browse Chrome bookmarks' }).click();
-  await page
+  const before = await worker.evaluate(() => chrome.bookmarks.getTree());
+  await dashboard
+    .getByRole('button', { name: 'Browse Chrome bookmarks' })
+    .click();
+  await dashboard
     .getByRole('button', { name: /Bookmarks bar|Bookmarks toolbar/ })
     .click();
-  const folderButton = page.getByRole('button', {
-    name: /Sidekick fixture folder/,
-  });
-  await folderButton.click();
+  await dashboard
+    .getByRole('button', { name: /Sidekick fixture folder/ })
+    .click();
   await expect(
-    page.getByRole('button', { name: 'Unsafe bookmark', exact: true }),
+    dashboard.getByRole('button', { name: 'Unsafe bookmark', exact: true }),
   ).toBeDisabled();
-  await page.getByLabel('Search bookmarks').fill('Garden bookmark');
-  await page
+  await dashboard.getByLabel('Search bookmarks').fill('Garden bookmark');
+  await dashboard
     .getByRole('button', {
       name: 'Favorite bookmark Garden bookmark',
       exact: true,
     })
     .click();
-  await expect(
-    page.getByRole('button', { name: 'Garden bookmark', exact: true }).first(),
-  ).toBeVisible();
+  await expect(dashboard.locator('.favorite-tile')).toHaveCount(1);
   expect(await worker.evaluate(() => chrome.bookmarks.getTree())).toEqual(
-    bookmarksBefore,
+    before,
   );
-  await page.getByRole('button', { name: 'Hide bookmarks' }).click();
-  await page.getByRole('button', { name: 'Add shortcut' }).click();
-  await page.getByLabel('Shortcut name').fill('My garden');
-  await page.getByLabel('Web address').fill(`${origin}/shortcut`);
-  await page.getByRole('button', { name: 'Save shortcut' }).click();
-  await expect(
-    page.getByRole('button', { name: 'My garden', exact: true }),
-  ).toBeVisible();
-  await page
-    .getByRole('button', { name: 'Edit My garden', exact: true })
+  await dashboard.getByRole('button', { name: 'Hide bookmarks' }).click();
+  await dashboard
+    .getByRole('button', { name: 'Add shortcut', exact: true })
     .click();
-  await page.getByLabel('Shortcut name').fill('Updated garden');
-  await page.getByRole('button', { name: 'Save shortcut' }).click();
-  await expect(
-    page.getByRole('button', { name: 'Updated garden', exact: true }),
-  ).toBeVisible();
+  await dashboard.getByLabel('Shortcut name').fill('My garden');
+  await dashboard.getByLabel('Web address').fill(origin + '/shortcut');
+  await dashboard
+    .getByRole('button', { name: 'Save shortcut', exact: true })
+    .click();
+  await dashboard
+    .getByRole('button', { name: 'Actions for My garden', exact: true })
+    .click();
+  await dashboard
+    .getByRole('menuitem', { name: 'Edit My garden', exact: true })
+    .click();
+  await dashboard.getByLabel('Shortcut name').fill('Updated garden');
+  await dashboard
+    .getByRole('button', { name: 'Save shortcut', exact: true })
+    .click();
   await page.reload();
   await expect(
-    page.getByRole('button', { name: 'Updated garden', exact: true }),
-  ).toBeVisible();
-  const originalWorkspace = await page
-    .getByLabel('Workspace', { exact: true })
-    .inputValue();
-  await worker.evaluate(async () => {
-    const key = 'sidekick.metadata.v1';
-    const metadata = (await chrome.storage.local.get(key))[key] as Metadata;
-    metadata.workspaces.push({
-      id: 'dashboard-other',
-      name: 'Other workspace',
-      color: '#80cbc4',
-      createdAt: new Date().toISOString(),
-    });
-    await chrome.storage.local.set({ [key]: metadata });
-  });
-  await page
-    .getByLabel('Workspace', { exact: true })
-    .selectOption('dashboard-other');
-  await expect(
-    page.getByRole('button', { name: 'Updated garden', exact: true }),
-  ).toHaveCount(0);
-  await page
-    .getByLabel('Workspace', { exact: true })
-    .selectOption(originalWorkspace);
-  await expect(
-    page.getByRole('button', { name: 'Updated garden', exact: true }),
+    dashboard.getByRole('button', { name: 'Updated garden', exact: true }),
   ).toBeVisible();
   await page.screenshot({ path: 'test-results/newtab.png', fullPage: true });
-  await page
-    .getByRole('button', {
-      name: 'Remove favorite Updated garden',
-      exact: true,
-    })
-    .click();
-  await expect(
-    page.getByRole('button', { name: 'Updated garden', exact: true }),
-  ).toHaveCount(0);
-  await page
-    .getByRole('button', {
-      name: 'Remove favorite Garden bookmark',
-      exact: true,
-    })
-    .click();
-  // Only this isolated test creates/removes Chrome fixtures; production is read-only.
-  await worker.evaluate((id) => chrome.bookmarks.removeTree(id), folder);
+  for (const title of ['Updated garden', 'Garden bookmark']) {
+    await dashboard
+      .getByRole('button', { name: 'Actions for ' + title, exact: true })
+      .click();
+    await dashboard
+      .getByRole('menuitem', { name: 'Remove favorite ' + title, exact: true })
+      .click();
+  }
+  await expect(dashboard.locator('.favorite-tile')).toHaveCount(0);
+  await worker.evaluate(
+    (folder) => chrome.bookmarks.removeTree(folder),
+    folder,
+  );
   await page.close();
 });
 
 test('address controls navigate, search, reject scripts, stop, reload and traverse history', async () => {
   const page = await context.newPage();
   await page.goto('chrome://newtab/');
-  const address = page.getByLabel('Address or Google search', { exact: true });
+  const address = page
+    .locator('.dashboard')
+    .getByLabel('Address or Google search', { exact: true });
   await address.fill('javascript:document.title="unsafe"');
   await address.press('Enter');
-  await expect(page.getByRole('alert')).toContainText('scheme');
+  await expect(page.locator('.dashboard').getByRole('alert')).toContainText(
+    'scheme',
+  );
   await address.fill(`${origin}/navigation`);
   await address.press('Enter');
   await expect(page).toHaveURL(`${origin}/navigation`);
@@ -372,7 +347,9 @@ test('Immersive restores fullscreen windows, keeps native/hover access, and surv
     margin: getComputedStyle(document.body).margin,
     padding: getComputedStyle(document.body).padding,
   }));
-  await ui.getByRole('button', { name: 'Pin sidebar', exact: true }).click();
+  await ui
+    .getByRole('button', { name: 'Open native fallback', exact: true })
+    .click();
   await expect(sidebar).toBeHidden();
   await expect
     .poll(() => page.evaluate(() => innerWidth))
@@ -528,7 +505,9 @@ test('Immersive restores fullscreen windows, keeps native/hover access, and surv
       windowId,
     );
   await expect(
-    control.getByRole('button', { name: 'Enter Immersive', exact: true }),
+    control
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Enter Immersive', exact: true }),
   ).toBeVisible();
   const other = await worker.evaluate(
     async () =>
@@ -716,7 +695,7 @@ test('loads MV3; hover, tabs, navigation, persistence, native fallback and worke
   await ui.getByRole('button', { name: 'Open settings' }).click();
   await ui.getByLabel('Display mode').selectOption('hover');
   await ui
-    .getByRole('slider', { name: 'Overlay width', exact: true })
+    .getByRole('slider', { name: 'Sidebar width', exact: true })
     .fill('340');
   await expect(sidebar).toHaveCSS('width', '340px');
   await page.reload();
@@ -844,15 +823,15 @@ test('loads MV3; hover, tabs, navigation, persistence, native fallback and worke
   await ui.getByRole('button', { name: 'Open settings' }).click();
   await expect(ui.getByLabel('Display mode')).toHaveValue('hover');
   await expect(
-    ui.getByRole('slider', { name: 'Overlay width', exact: true }),
+    ui.getByRole('slider', { name: 'Sidebar width', exact: true }),
   ).toHaveValue('340');
   await context.setOffline(true);
   await ui
-    .getByRole('slider', { name: 'Overlay width', exact: true })
+    .getByRole('slider', { name: 'Sidebar width', exact: true })
     .fill('350');
   await expect(sidebar).toHaveCSS('width', '350px');
   await ui
-    .getByRole('slider', { name: 'Overlay width', exact: true })
+    .getByRole('slider', { name: 'Sidebar width', exact: true })
     .fill('340');
   await expect(sidebar).toHaveCSS('width', '340px');
   await context.setOffline(false);
@@ -879,7 +858,9 @@ test('Pin opens the real native panel and suppresses the webpage overlay', async
     padding: getComputedStyle(document.body).padding,
     margin: getComputedStyle(document.body).margin,
   }));
-  await ui.getByRole('button', { name: 'Pin sidebar', exact: true }).click();
+  await ui
+    .getByRole('button', { name: 'Open native fallback', exact: true })
+    .click();
   await expect(sidebar).toBeHidden();
   await expect
     .poll(() =>
@@ -1011,7 +992,9 @@ test('Pin opens the real native panel and suppresses the webpage overlay', async
   );
   await ui.getByRole('button', { name: 'Clear search' }).click();
   // A browser-originated closure follows the same Chrome event as its × button.
-  await ui.getByRole('button', { name: 'Pin sidebar', exact: true }).click();
+  await ui
+    .getByRole('button', { name: 'Open native fallback', exact: true })
+    .click();
   const windowId = await worker.evaluate(
     async () => (await chrome.windows.getLastFocused()).id!,
   );

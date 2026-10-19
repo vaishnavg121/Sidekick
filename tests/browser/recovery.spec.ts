@@ -44,21 +44,105 @@ test('Immersive extension reload and full browser restart retain a usable exit',
     let page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/newtab.html`);
     await expect(
-      page.getByRole('button', { name: 'Enter Immersive', exact: true }),
-    ).toBeVisible();
-    await page.getByRole('button', { name: 'Add shortcut' }).click();
-    await page.getByLabel('Shortcut name').fill('Survives restart');
-    await page.getByLabel('Web address').fill('https://example.com/');
-    await page.getByRole('button', { name: 'Save shortcut' }).click();
-    await expect(
-      page.getByRole('button', { name: 'Survives restart', exact: true }),
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Enter Immersive', exact: true }),
     ).toBeVisible();
     await page
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Add shortcut' })
+      .click();
+    await page
+      .locator('.dashboard')
+      .getByLabel('Shortcut name')
+      .fill('Survives restart');
+    await page
+      .locator('.dashboard')
+      .getByLabel('Web address')
+      .fill('https://example.com/');
+    await page
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Save shortcut' })
+      .click();
+    await expect(
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Survives restart', exact: true }),
+    ).toBeVisible();
+    await page
+      .locator('.dashboard')
       .getByRole('button', { name: 'Enter Immersive', exact: true })
       .click();
     await expect(
-      page.getByRole('button', { name: 'Exit Immersive', exact: true }),
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Exit Immersive', exact: true }),
     ).toBeVisible();
+    await page
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Add pinned URL', exact: true })
+      .click();
+    await page
+      .locator('.dashboard')
+      .getByLabel('Pinned name')
+      .fill('Pinned survives restart');
+    await page
+      .locator('.dashboard')
+      .getByLabel('Web address')
+      .fill('https://example.org/');
+    await page
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Save pinned entry', exact: true })
+      .click();
+    await page
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Create pinned folder', exact: true })
+      .click();
+    await page
+      .locator('.dashboard')
+      .getByLabel('Folder name')
+      .fill('Persistent folder');
+    await page
+      .locator('.dashboard')
+      .getByRole('button', { name: 'Save folder', exact: true })
+      .click();
+    await page
+      .locator('.dashboard')
+      .getByRole('button', {
+        name: 'Actions for pinned Pinned survives restart',
+        exact: true,
+      })
+      .click();
+    await page
+      .locator('.dashboard')
+      .getByLabel('Move pinned Pinned survives restart to folder', {
+        exact: true,
+      })
+      .selectOption({ label: 'Persistent folder' });
+    await page.evaluate(async () => {
+      const window = (await chrome.windows.getCurrent()).id;
+      await chrome.runtime.sendMessage({
+        channel: 'sidekick',
+        windowId: window,
+        command: { type: 'sidebar.mode', mode: 'docked' },
+      });
+    });
+    await context.route('https://example.com/m13-docked', (route) =>
+      route.fulfill({
+        contentType: 'text/html',
+        body: '<!doctype html><title>Reload layout fixture</title><body><main>Content must return to its original layout</main></body>',
+      }),
+    );
+    const dockedPage = await context.newPage();
+    await dockedPage.goto('https://example.com/m13-docked');
+    await expect
+      .poll(() =>
+        dockedPage.evaluate(
+          () => document.documentElement.getBoundingClientRect().left,
+        ),
+      )
+      .toBe(320);
+    await page.bringToFront();
     await page.evaluate(() => {
       setTimeout(() => chrome.runtime.reload(), 0);
     });
@@ -73,6 +157,14 @@ test('Immersive extension reload and full browser restart retain a usable exit',
         }
       })
       .toBe(false);
+    await expect
+      .poll(() =>
+        dockedPage.evaluate(
+          () => document.documentElement.getBoundingClientRect().left,
+        ),
+      )
+      .toBe(0);
+    await expect(dockedPage.locator('sidekick-sidebar')).toHaveCount(0);
     page = await context.newPage();
     await expect
       .poll(
@@ -88,12 +180,17 @@ test('Immersive extension reload and full browser restart retain a usable exit',
       )
       .toBe(true);
     await expect(
-      page.getByRole('button', { name: 'Exit Immersive', exact: true }),
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Exit Immersive', exact: true }),
     ).toBeVisible();
     await expect(
-      page.getByRole('button', { name: 'Survives restart', exact: true }),
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Survives restart', exact: true }),
     ).toBeVisible();
     await page
+      .locator('.dashboard')
       .getByRole('button', { name: 'Exit Immersive', exact: true })
       .click();
     await expect
@@ -102,31 +199,43 @@ test('Immersive extension reload and full browser restart retain a usable exit',
       )
       .toBe('normal');
     await page
+      .locator('.dashboard')
       .getByRole('button', { name: 'Enter Immersive', exact: true })
       .click();
     await expect(
-      page.getByRole('button', { name: 'Exit Immersive', exact: true }),
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Exit Immersive', exact: true }),
     ).toBeVisible();
     await context.close();
     context = await launch();
     page = await context.newPage();
     await page.goto(`chrome-extension://${extensionId}/newtab.html`);
     await expect(
-      page.getByRole('button', { name: 'Survives restart', exact: true }),
+      page
+        .locator('.dashboard')
+        .getByRole('button', { name: 'Survives restart', exact: true }),
     ).toBeVisible();
     const state = await page.evaluate(
       async () => (await chrome.windows.getCurrent()).state,
     );
     console.log(`Chrome window after full restart: ${state}`);
+    await expect(
+      page.locator('.dashboard .pinned-folder').getByRole('button', {
+        name: 'Open pinned Pinned survives restart',
+        exact: true,
+      }),
+    ).toBeVisible();
     const immersive = state === 'fullscreen';
     await expect(
-      page.getByRole('button', {
+      page.locator('.dashboard').getByRole('button', {
         name: immersive ? 'Exit Immersive' : 'Enter Immersive',
         exact: true,
       }),
     ).toBeVisible();
     if (immersive)
       await page
+        .locator('.dashboard')
         .getByRole('button', { name: 'Exit Immersive', exact: true })
         .click();
     await expect

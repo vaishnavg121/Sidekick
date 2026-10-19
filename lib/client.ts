@@ -64,6 +64,8 @@ export class SidebarClient {
       this.port.postMessage({ type: 'subscribe', windowId: this.windowId });
     } catch {
       this.connection(false);
+      if (!chrome.runtime.id)
+        pageControls.dispatchEvent(new Event('invalidated'));
       this.receive({
         type: 'error',
         error:
