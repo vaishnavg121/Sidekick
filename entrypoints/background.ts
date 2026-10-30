@@ -412,11 +412,18 @@ export default defineBackground(() => {
               break;
             }
             case 'ai.classify': {
+              const metadata = await repository.get();
+              const existingClassifications =
+                metadata.aiState?.tabClassifications ?? {};
               const tabs = (await chrome.tabs.query({ windowId }))
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              const classifications = await aiService.classifyTabs(targetTabs);
+              const classifications = await aiService.classifyTabs(
+                targetTabs,
+                undefined,
+                existingClassifications,
+              );
               // Send results back to client
               for (const port of clients.keys()) {
                 if (clients.get(port) === windowId) {
@@ -497,23 +504,122 @@ export default defineBackground(() => {
               break;
             }
             case 'ai.apply.classification': {
-              // Classifications are applied client-side; background just acknowledges
+              const { classifications } = c;
+              await repository.updateAiState((aiState) => {
+                const newClassifications = { ...aiState.tabClassifications };
+                for (const cls of classifications) {
+                  newClassifications[cls.tabId] = cls;
+                }
+                return { ...aiState, tabClassifications: newClassifications };
+              });
               break;
             }
             case 'ai.apply.routing': {
-              // Routing is applied client-side; background just acknowledges
+              const { recommendations } = c;
+              const metadata = await repository.get();
+              // Reject tracking
+              await repository.updateAiState((aiState) => {
+                const rejectedRecs = { ...aiState.rejectedRecommendations };
+                for (const rec of recommendations) {
+                  if (!rejectedRecs[rec.tabId]) rejectedRecs[rec.tabId] = [];
+                }
+                return { ...aiState, rejectedRecommendations: rejectedRecs };
+              });
+              // For each recommendation, move the tab to the workspace
+              for (const rec of recommendations) {
+                const tab = await chrome.tabs.get(rec.tabId).catch(() => null);
+                if (!tab) continue;
+                // Check if this recommendation was rejected before
+                const rejected =
+                  metadata.aiState?.rejectedRecommendations?.[rec.tabId] ?? [];
+                if (rejected.includes(rec.workspaceId)) continue;
+                // Use resource.current to save as pinned in the target workspace
+                await resources.handle(
+                  {
+                    type: 'resource.current',
+                    kind: 'pinned',
+                    tabId: rec.tabId,
+                    folderId: null,
+                  },
+                  windowId,
+                );
+                // Then move it to the target workspace
+                await resources.handle(
+                  {
+                    type: 'resource.move',
+                    kind: 'pinned',
+                    id: String(rec.tabId),
+                    workspaceId: rec.workspaceId,
+                    folderId: null,
+                  },
+                  windowId,
+                );
+              }
               break;
             }
             case 'ai.apply.groups': {
-              // Groups are applied client-side; background just acknowledges
+              const { groups } = c;
+              const metadata = await repository.get();
+              for (const group of groups) {
+                // Create folder
+                const folderResult = await repository.authorFolder({
+                  workspaceId: metadata.activeWorkspaceId,
+                  parentId: null,
+                  name: group.topic,
+                });
+                const folderId = folderResult.folders.find(
+                  (f) =>
+                    f.name === group.topic &&
+                    f.workspaceId === metadata.activeWorkspaceId,
+                )?.id;
+                if (!folderId) continue;
+                // Move each tab in the group to the folder as pinned entries
+                for (const tabId of group.tabs) {
+                  try {
+                    await resources.handle(
+                      {
+                        type: 'resource.current',
+                        kind: 'pinned',
+                        tabId,
+                        folderId,
+                      },
+                      windowId,
+                    );
+                  } catch {
+                    // Tab might have been closed, skip
+                  }
+                }
+              }
               break;
             }
             case 'ai.apply.focus': {
-              // Focus relevance is applied client-side; background just acknowledges
+              const { relevance } = c;
+              const metadata = await repository.get();
+              const workspaceId = metadata.activeWorkspaceId;
+              const hiddenTabIds = relevance
+                .filter((r) => r.score < 0.5)
+                .map((r) => r.tabId);
+              await repository.updateAiState((aiState) => {
+                const focusPref = aiState.focusPreferences[workspaceId] ?? {
+                  goal: '',
+                  mode: false,
+                  hiddenTabIds: [],
+                  lastUpdated: new Date().toISOString(),
+                };
+                focusPref.hiddenTabIds = hiddenTabIds;
+                focusPref.lastUpdated = new Date().toISOString();
+                return {
+                  ...aiState,
+                  focusPreferences: {
+                    ...aiState.focusPreferences,
+                    [workspaceId]: focusPref,
+                  },
+                };
+              });
               break;
             }
             case 'ai.apply.cleanup': {
-              // Cleanup suggestions are applied client-side; background just acknowledges
+              // Cleanup is handled client-side with confirmation
               break;
             }
           }

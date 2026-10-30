@@ -45,6 +45,18 @@ export interface Metadata {
   folders: Folder[];
   preferences: SidebarPreferences;
   aiSettings?: AiSettings;
+  aiState?: AiState;
+}
+export interface AiState {
+  tabClassifications: Record<number, TabClassification>;
+  rejectedRecommendations: Record<number, string[]>; // tabId -> workspaceId[]
+  focusPreferences: Record<string, FocusPreference>; // workspaceId -> FocusPreference
+}
+export interface FocusPreference {
+  goal: string;
+  mode: boolean;
+  hiddenTabIds: number[];
+  lastUpdated: string;
 }
 // Browser-session handles only. Never persist these in chrome.storage.local.
 export interface SessionMembership {

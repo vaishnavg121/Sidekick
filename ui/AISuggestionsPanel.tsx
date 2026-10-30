@@ -139,16 +139,22 @@ function RoutingSection({
   tabs,
   recommendations,
   workspaces,
+  rejectedRecommendations,
   onAccept,
   onReject,
 }: {
   tabs: TabItem[];
   recommendations: WorkspaceRecommendation[];
   workspaces: Workspace[];
+  rejectedRecommendations: Record<number, string[]>;
   onAccept: (tabId: number, workspaceId: string) => void;
   onReject: (tabId: number) => void;
 }) {
-  if (recommendations.length === 0) return null;
+  if (
+    recommendations.length === 0 &&
+    Object.keys(rejectedRecommendations).length === 0
+  )
+    return null;
 
   return (
     <section className="ai-section">
@@ -162,8 +168,14 @@ function RoutingSection({
           const tab = tabs.find((t) => t.id === rec.tabId);
           const workspace = workspaces.find((w) => w.id === rec.workspaceId);
           if (!tab || !workspace) return null;
+          const isRejected =
+            rejectedRecommendations[rec.tabId]?.includes(rec.workspaceId) ??
+            false;
           return (
-            <div key={tab.id} className="ai-suggestion-row">
+            <div
+              key={tab.id}
+              className={`ai-suggestion-row ${isRejected ? 'rejected' : ''}`}
+            >
               <SuggestionTab
                 tab={tab}
                 showWorkspace
@@ -176,23 +188,65 @@ function RoutingSection({
                 <span className="ai-reasoning">{rec.reason}</span>
               </div>
               <div className="ai-suggestion-actions">
-                <button
-                  className="text-button small"
-                  onClick={() => onAccept(tab.id, rec.workspaceId)}
-                >
-                  Move
-                </button>
-                <button
-                  className="text-button small ghost"
-                  onClick={() => onReject(tab.id)}
-                >
-                  Reject
-                </button>
+                {isRejected ? (
+                  <button
+                    className="text-button small"
+                    onClick={() => onAccept(tab.id, rec.workspaceId)}
+                  >
+                    Restore
+                  </button>
+                ) : (
+                  <>
+                    <button
+                      className="text-button small"
+                      onClick={() => onAccept(tab.id, rec.workspaceId)}
+                    >
+                      Move
+                    </button>
+                    <button
+                      className="text-button small ghost"
+                      onClick={() => onReject(tab.id)}
+                    >
+                      Reject
+                    </button>
+                  </>
+                )}
               </div>
             </div>
           );
         })}
       </div>
+      {Object.keys(rejectedRecommendations).length > 0 && (
+        <div className="ai-rejected-list">
+          <h4>Dismissed suggestions</h4>
+          {Object.entries(rejectedRecommendations).map(
+            ([tabIdStr, workspaceIds]) => {
+              const tabId = Number(tabIdStr);
+              const tab = tabs.find((t) => t.id === tabId);
+              if (!tab) return null;
+              return (
+                <div key={tabId} className="ai-rejected-item">
+                  <SuggestionTab tab={tab} />
+                  <span className="ai-rejected-workspaces">
+                    {workspaceIds
+                      .map((id) => workspaces.find((w) => w.id === id)?.name)
+                      .filter((n): n is string => !!n)
+                      .join(', ')}
+                  </span>
+                  <button
+                    className="text-button small"
+                    onClick={() =>
+                      workspaceIds.forEach((wsId) => onAccept(tabId, wsId))
+                    }
+                  >
+                    Restore All
+                  </button>
+                </div>
+              );
+            },
+          )}
+        </div>
+      )}
     </section>
   );
 }
@@ -478,6 +532,12 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
   const state = useSidebar();
   const [organizing, setOrganizing] = useState(false);
   const [focusGoal, setFocusGoal] = useState('');
+  const [cleanupConfirm, setCleanupConfirm] =
+    useState<CleanupSuggestion | null>(null);
+  const [lastAction, setLastAction] = useState<{
+    type: string;
+    data: unknown;
+  } | null>(null);
 
   const {
     tabs,
@@ -496,6 +556,8 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
 
   const activeWorkspaceId = metadata?.activeWorkspaceId ?? '';
   const workspaces = metadata?.workspaces ?? [];
+  const rejectedRecommendations =
+    metadata?.aiState?.rejectedRecommendations ?? {};
 
   const run = (command: Command) => {
     void client.command(command).catch((e: Error) => state.setError(e.message));
@@ -629,6 +691,12 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
   };
 
   const acceptCleanup = (suggestion: CleanupSuggestion) => {
+    setCleanupConfirm(suggestion);
+  };
+
+  const confirmCleanup = () => {
+    if (!cleanupConfirm) return;
+    const suggestion = cleanupConfirm;
     if (suggestion.type === 'duplicate') {
       // Remove duplicate tabs (keep first)
       const toRemove = suggestion.tabIds.slice(1);
@@ -636,9 +704,15 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
         run({ type: 'tab.close', tabId });
       }
     }
+    setLastAction({ type: 'cleanup', data: suggestion });
     state.ai.setCleanupSuggestions(
       state.ai.cleanupSuggestions.filter((s) => s !== suggestion),
     );
+    setCleanupConfirm(null);
+  };
+
+  const cancelCleanup = () => {
+    setCleanupConfirm(null);
   };
 
   const rejectCleanup = (suggestion: CleanupSuggestion) => {
@@ -723,6 +797,7 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
                 tabs={tabs}
                 recommendations={recommendations}
                 workspaces={workspaces}
+                rejectedRecommendations={rejectedRecommendations}
                 onAccept={acceptRouting}
                 onReject={rejectRouting}
               />
@@ -753,6 +828,54 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
               />
             )}
           </div>
+
+          {cleanupConfirm && (
+            <div className="ai-confirm-overlay">
+              <div className="ai-confirm-dialog">
+                <h3>Confirm Cleanup</h3>
+                <p>
+                  {cleanupConfirm.type === 'duplicate'
+                    ? `This will close ${cleanupConfirm.tabIds.length - 1} duplicate tab(s). The first tab will be kept.`
+                    : `This will remove ${cleanupConfirm.tabIds.length} tab(s) marked as ${cleanupConfirm.type}.`}
+                </p>
+                <p className="ai-confirm-warning">
+                  Closed tabs cannot be automatically restored. Form data and
+                  scroll position will be lost.
+                </p>
+                <div className="ai-confirm-tabs">
+                  {cleanupConfirm.tabIds
+                    .map((id) => tabs.find((t) => t.id === id))
+                    .filter((t): t is TabItem => !!t)
+                    .map((tab) => (
+                      <SuggestionTab key={tab.id} tab={tab} />
+                    ))}
+                </div>
+                <div className="ai-confirm-actions">
+                  <button className="text-button ghost" onClick={cancelCleanup}>
+                    Cancel
+                  </button>
+                  <button
+                    className="text-button danger"
+                    onClick={confirmCleanup}
+                  >
+                    Confirm
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {lastAction && (
+            <div className="ai-undo-toast">
+              <span>Action applied: {lastAction.type}</span>
+              <button
+                className="text-button small"
+                onClick={() => setLastAction(null)}
+              >
+                Dismiss
+              </button>
+            </div>
+          )}
 
           {!hasSuggestions && !isLoading && (
             <div className="ai-empty-state">

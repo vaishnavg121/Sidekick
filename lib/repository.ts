@@ -10,6 +10,7 @@ import {
   type PinnedEntry,
   type Folder,
   type ResourceKind,
+  type AiState,
 } from './models';
 import {
   saveResource,
@@ -89,6 +90,27 @@ export function isMetadata(value: unknown): value is Metadata {
   )
     return false;
   if (!validateFolders(m.folders, ids)) return false;
+  if (m.aiSettings !== undefined) {
+    if (
+      typeof m.aiSettings !== 'object' ||
+      m.aiSettings === null ||
+      typeof m.aiSettings.connected !== 'boolean' ||
+      !['disconnected', 'connecting', 'connected', 'error'].includes(
+        m.aiSettings.status,
+      )
+    )
+      return false;
+  }
+  if (m.aiState !== undefined) {
+    if (
+      typeof m.aiState !== 'object' ||
+      m.aiState === null ||
+      typeof m.aiState.tabClassifications !== 'object' ||
+      typeof m.aiState.rejectedRecommendations !== 'object' ||
+      typeof m.aiState.focusPreferences !== 'object'
+    )
+      return false;
+  }
   return m.pinnedEntries.every(
     (e) =>
       e.folderId === null ||
@@ -284,6 +306,18 @@ export class MetadataRepository {
   }
   saveFolder(folder: Folder): Promise<Metadata> {
     return this.update((m) => ({ ...m, folders: upsert(m.folders, folder) }));
+  }
+  updateAiState(change: (aiState: AiState) => AiState): Promise<Metadata> {
+    return this.update((m) => ({
+      ...m,
+      aiState: change(
+        m.aiState ?? {
+          tabClassifications: {},
+          rejectedRecommendations: {},
+          focusPreferences: {},
+        },
+      ),
+    }));
   }
   private update(change: (m: Metadata) => Metadata): Promise<Metadata> {
     return this.serial(async () => {

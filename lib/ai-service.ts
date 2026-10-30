@@ -286,6 +286,7 @@ export class AiService {
   async classifyTabs(
     tabs: TabItem[],
     customCategories?: TabCategory[],
+    existingClassifications?: Record<number, TabClassification>,
   ): Promise<TabClassification[]> {
     const cacheKey = this.getCacheKey('classify', tabs);
     const cached = this.getFromCache<TabClassification[]>(cacheKey);
@@ -314,8 +315,23 @@ export class AiService {
           confidence: Math.max(0, Math.min(1, c.confidence)),
         }));
 
-      this.setCache(cacheKey, results);
-      return results;
+      // Merge with existing user classifications (user overrides AI)
+      const merged = [...results];
+      if (existingClassifications) {
+        for (const [tabId, userCls] of Object.entries(
+          existingClassifications,
+        )) {
+          const idx = merged.findIndex((c) => c.tabId === Number(tabId));
+          if (idx >= 0) {
+            merged[idx] = userCls; // User override wins
+          } else {
+            merged.push(userCls); // User classified a tab AI didn't
+          }
+        }
+      }
+
+      this.setCache(cacheKey, merged);
+      return merged;
     });
   }
 
