@@ -3,6 +3,12 @@ import type {
   SidebarPreferences,
   ResourceKind,
   Theme,
+  AiSettings,
+  TabClassification,
+  WorkspaceRecommendation,
+  RelatedTabGroup,
+  FocusRelevance,
+  CleanupSuggestion,
 } from './models';
 import type { ResourceInput } from './resources';
 import type { TabItem } from './tabs';
@@ -81,7 +87,18 @@ export type Command =
   | { type: 'sidebar.mode'; mode: 'hidden' | 'hover' | 'docked' }
   | { type: 'search.update'; query: string }
   | { type: 'preferences.update'; patch: Partial<SidebarPreferences> }
-  | { type: 'workspace.select'; id: string };
+  | { type: 'workspace.select'; id: string }
+  | { type: 'ai.settings.update'; patch: Partial<AiSettings> }
+  | { type: 'ai.classify'; tabIds: number[] }
+  | { type: 'ai.route'; tabIds: number[] }
+  | { type: 'ai.group'; tabIds: number[] }
+  | { type: 'ai.focus'; goal: string; tabIds: number[] }
+  | { type: 'ai.cleanup'; tabIds: number[] }
+  | { type: 'ai.apply.classification'; classifications: TabClassification[] }
+  | { type: 'ai.apply.routing'; recommendations: WorkspaceRecommendation[] }
+  | { type: 'ai.apply.groups'; groups: RelatedTabGroup[] }
+  | { type: 'ai.apply.focus'; relevance: FocusRelevance[] }
+  | { type: 'ai.apply.cleanup'; suggestions: CleanupSuggestion[] };
 export type Request = {
   channel: 'sidekick';
   windowId?: number;
@@ -228,6 +245,127 @@ export function isCommand(value: unknown): value is Command {
             Number.isFinite(v),
       );
     }
+    case 'ai.settings.update': {
+      if (!c.patch || typeof c.patch !== 'object' || Array.isArray(c.patch))
+        return false;
+      return Object.entries(c.patch).every(
+        ([key, v]) =>
+          [
+            'gatewayKey',
+            'connected',
+            'status',
+            'lastError',
+            'lastVerified',
+          ].includes(key) &&
+          (key === 'gatewayKey'
+            ? typeof v === 'string' || v === undefined
+            : key === 'connected'
+              ? typeof v === 'boolean'
+              : key === 'status'
+                ? ['disconnected', 'connecting', 'connected', 'error'].includes(
+                    String(v),
+                  )
+                : key === 'lastError'
+                  ? typeof v === 'string' || v === undefined
+                  : key === 'lastVerified'
+                    ? typeof v === 'string' || v === undefined
+                    : true),
+      );
+    }
+    case 'ai.classify':
+    case 'ai.route':
+    case 'ai.group':
+    case 'ai.cleanup':
+      return (
+        Array.isArray(c.tabIds) &&
+        c.tabIds.length <= 100 &&
+        c.tabIds.every(
+          (t): t is number =>
+            typeof t === 'number' && Number.isInteger(t) && t >= 0,
+        )
+      );
+    case 'ai.focus':
+      return (
+        typeof c.goal === 'string' &&
+        c.goal.length <= 500 &&
+        Array.isArray(c.tabIds) &&
+        c.tabIds.length <= 100 &&
+        c.tabIds.every(
+          (t): t is number =>
+            typeof t === 'number' && Number.isInteger(t) && t >= 0,
+        )
+      );
+    case 'ai.apply.classification':
+      return (
+        Array.isArray(c.classifications) &&
+        c.classifications.length <= 100 &&
+        c.classifications.every(
+          (cls: unknown) =>
+            cls &&
+            typeof cls === 'object' &&
+            typeof (cls as Record<string, unknown>).tabId === 'number' &&
+            typeof (cls as Record<string, unknown>).category === 'string' &&
+            typeof (cls as Record<string, unknown>).confidence === 'number' &&
+            typeof (cls as Record<string, unknown>).reasoning === 'string',
+        )
+      );
+    case 'ai.apply.routing':
+      return (
+        Array.isArray(c.recommendations) &&
+        c.recommendations.length <= 100 &&
+        c.recommendations.every(
+          (rec: unknown) =>
+            rec &&
+            typeof rec === 'object' &&
+            typeof (rec as Record<string, unknown>).tabId === 'number' &&
+            typeof (rec as Record<string, unknown>).workspaceId === 'string' &&
+            typeof (rec as Record<string, unknown>).workspaceName ===
+              'string' &&
+            typeof (rec as Record<string, unknown>).reason === 'string' &&
+            typeof (rec as Record<string, unknown>).confidence === 'number',
+        )
+      );
+    case 'ai.apply.groups':
+      return (
+        Array.isArray(c.groups) &&
+        c.groups.length <= 100 &&
+        c.groups.every(
+          (grp: unknown) =>
+            grp &&
+            typeof grp === 'object' &&
+            Array.isArray((grp as Record<string, unknown>).tabs) &&
+            typeof (grp as Record<string, unknown>).topic === 'string' &&
+            typeof (grp as Record<string, unknown>).description === 'string',
+        )
+      );
+    case 'ai.apply.focus':
+      return (
+        Array.isArray(c.relevance) &&
+        c.relevance.length <= 100 &&
+        c.relevance.every(
+          (rel: unknown) =>
+            rel &&
+            typeof rel === 'object' &&
+            typeof (rel as Record<string, unknown>).tabId === 'number' &&
+            typeof (rel as Record<string, unknown>).score === 'number' &&
+            typeof (rel as Record<string, unknown>).reason === 'string',
+        )
+      );
+    case 'ai.apply.cleanup':
+      return (
+        Array.isArray(c.suggestions) &&
+        c.suggestions.length <= 100 &&
+        c.suggestions.every(
+          (sug: unknown) =>
+            sug &&
+            typeof sug === 'object' &&
+            ['duplicate', 'stale', 'low-value'].includes(
+              String((sug as Record<string, unknown>).type),
+            ) &&
+            Array.isArray((sug as Record<string, unknown>).tabIds) &&
+            typeof (sug as Record<string, unknown>).description === 'string',
+        )
+      );
     default:
       return false;
   }

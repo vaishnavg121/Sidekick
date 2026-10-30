@@ -14,6 +14,8 @@ import { NavigationService, safeUrl } from '../lib/navigation';
 import { readBookmarks } from '../lib/bookmarks';
 import { isRestrictedUrl } from '../lib/tabs';
 import { ResourceService } from '../lib/resource-service';
+import { aiService } from '../lib/ai-service';
+import type { AiSettings } from '../lib/models';
 
 export default defineBackground(() => {
   const repository = new MetadataRepository(chrome.storage.local);
@@ -56,6 +58,35 @@ export default defineBackground(() => {
       clients.delete(port);
     }
   };
+  // AI settings storage key
+  const AI_SETTINGS_KEY = 'sidekick.ai.v1';
+  async function getAiSettings(): Promise<AiSettings> {
+    const value = (await chrome.storage.local.get(AI_SETTINGS_KEY))[
+      AI_SETTINGS_KEY
+    ];
+    if (
+      value &&
+      typeof value === 'object' &&
+      'connected' in value &&
+      'status' in value
+    ) {
+      return value as AiSettings;
+    }
+    return { connected: false, status: 'disconnected' };
+  }
+  async function setAiSettings(
+    patch: Partial<AiSettings>,
+  ): Promise<AiSettings> {
+    const current = await getAiSettings();
+    const next = { ...current, ...patch };
+    await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
+    return next;
+  }
+  async function verifyAiKey(
+    key: string,
+  ): Promise<{ ok: boolean; error?: string }> {
+    return aiService.verifyConnection(key);
+  }
   async function refresh() {
     dirty = true;
     if (refreshing) return;
@@ -77,11 +108,12 @@ export default defineBackground(() => {
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const windowState = await windows.get(windowId);
+              const aiSettings = await getAiSettings();
               if (clients.has(port))
                 send(port, {
                   type: 'snapshot',
                   tabs,
-                  metadata,
+                  metadata: { ...metadata, aiSettings },
                   windowId,
                   windowState,
                 });
@@ -342,6 +374,105 @@ export default defineBackground(() => {
             case 'workspace.select':
               await repository.selectWorkspace(c.id);
               break;
+            case 'ai.settings.update': {
+              const patch = c.patch;
+              if (patch.gatewayKey !== undefined) {
+                if (patch.gatewayKey === '') {
+                  await setAiSettings({
+                    gatewayKey: undefined,
+                    connected: false,
+                    status: 'disconnected',
+                  });
+                  aiService.setGatewayKey(undefined);
+                } else {
+                  await setAiSettings({ status: 'connecting' });
+                  const verification = await verifyAiKey(patch.gatewayKey);
+                  if (verification.ok) {
+                    await setAiSettings({
+                      gatewayKey: patch.gatewayKey,
+                      connected: true,
+                      status: 'connected',
+                      lastError: undefined,
+                      lastVerified: new Date().toISOString(),
+                    });
+                    aiService.setGatewayKey(patch.gatewayKey);
+                  } else {
+                    await setAiSettings({
+                      gatewayKey: patch.gatewayKey,
+                      connected: false,
+                      status: 'error',
+                      lastError: verification.error,
+                    });
+                  }
+                }
+              } else {
+                await setAiSettings(patch);
+              }
+              // Send updated settings back to client via refresh
+              break;
+            }
+            case 'ai.classify': {
+              const tabs = (await chrome.tabs.query({ windowId }))
+                .map(toTabItem)
+                .filter((t): t is TabItem => !!t);
+              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
+              await aiService.classifyTabs(targetTabs);
+              // Results are cached and will be sent via next refresh
+              break;
+            }
+            case 'ai.route': {
+              const metadata = await repository.get();
+              const tabs = (await chrome.tabs.query({ windowId }))
+                .map(toTabItem)
+                .filter((t): t is TabItem => !!t);
+              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
+              await aiService.routeTabs(targetTabs, metadata.workspaces);
+              break;
+            }
+            case 'ai.group': {
+              const tabs = (await chrome.tabs.query({ windowId }))
+                .map(toTabItem)
+                .filter((t): t is TabItem => !!t);
+              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
+              await aiService.groupTabs(targetTabs);
+              break;
+            }
+            case 'ai.focus': {
+              const tabs = (await chrome.tabs.query({ windowId }))
+                .map(toTabItem)
+                .filter((t): t is TabItem => !!t);
+              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
+              await aiService.scoreFocus(targetTabs, c.goal);
+              break;
+            }
+            case 'ai.cleanup': {
+              const tabs = (await chrome.tabs.query({ windowId }))
+                .map(toTabItem)
+                .filter((t): t is TabItem => !!t);
+              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
+              await aiService.suggestCleanup(targetTabs);
+              break;
+            }
+            case 'ai.apply.classification': {
+              // Classifications are applied client-side; background just acknowledges
+              break;
+            }
+            case 'ai.apply.routing': {
+              // Routing is applied client-side; background just acknowledges
+              break;
+            }
+            case 'ai.apply.groups': {
+              // Groups are applied client-side; background just acknowledges
+              break;
+            }
+            case 'ai.apply.focus': {
+              // Focus relevance is applied client-side; background just acknowledges
+              break;
+            }
+            case 'ai.apply.cleanup': {
+              // Cleanup suggestions are applied client-side; background just acknowledges
+              break;
+            }
           }
           respond({ ok: true });
           void refresh();

@@ -44,6 +44,7 @@ export interface Metadata {
   pinnedEntries: PinnedEntry[];
   folders: Folder[];
   preferences: SidebarPreferences;
+  aiSettings?: AiSettings;
 }
 // Browser-session handles only. Never persist these in chrome.storage.local.
 export interface SessionMembership {
@@ -63,6 +64,51 @@ export interface WorkspaceSwitcher {
 export interface SecretProvider {
   getGatewayKey(): Promise<string | undefined>;
   clearGatewayKey(): Promise<void>;
+}
+export interface AiSettings {
+  gatewayKey?: string;
+  connected: boolean;
+  status: 'disconnected' | 'connecting' | 'connected' | 'error';
+  lastError?: string;
+  lastVerified?: string;
+}
+export type TabCategory =
+  | 'Development'
+  | 'Research'
+  | 'Education'
+  | 'Documentation'
+  | 'Productivity'
+  | 'Entertainment'
+  | 'Shopping'
+  | 'Communication'
+  | 'Other';
+export interface TabClassification {
+  tabId: number;
+  category: TabCategory;
+  confidence: number;
+  reasoning: string;
+}
+export interface WorkspaceRecommendation {
+  tabId: number;
+  workspaceId: string;
+  workspaceName: string;
+  reason: string;
+  confidence: number;
+}
+export interface RelatedTabGroup {
+  tabs: number[];
+  topic: string;
+  description: string;
+}
+export interface FocusRelevance {
+  tabId: number;
+  score: number;
+  reason: string;
+}
+export interface CleanupSuggestion {
+  type: 'duplicate' | 'stale' | 'low-value';
+  tabIds: number[];
+  description: string;
 }
 export const DEFAULT_PREFERENCES: SidebarPreferences = {
   mode: 'hover',

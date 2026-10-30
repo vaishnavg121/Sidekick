@@ -17,7 +17,8 @@ export function Icon({
     | 'stop'
     | 'copy'
     | 'fullscreen'
-    | 'folder';
+    | 'folder'
+    | 'sparkles';
   size?: number;
 }) {
   const paths = {
@@ -36,6 +37,12 @@ export function Icon({
     ),
     fullscreen: <path d="M9 3H3v6m12-6h6v6M3 15v6h6m12-6v6h-6" />,
     folder: <path d="M3 7V4h6l3 3h9v13H3Z" />,
+    sparkles: (
+      <>
+        <path d="M12 2v2m0 16v2m-9-9h2m14 0h2m-7.5-7.5l1.4 1.4m10.2 0-1.4 1.4m0-12.8 1.4 1.4M6.6 15.6 8 17m11.2-12.8 1.4 1.4" />
+        <circle cx="12" cy="12" r="2" />
+      </>
+    ),
     search: (
       <>
         <circle cx="10.5" cy="10.5" r="6.5" />

@@ -417,6 +417,22 @@ export function Sidebar({
                 <Icon name="collapse" />
               </button>
             )}
+            {state.metadata?.aiSettings?.status === 'connected' && (
+              <button
+                className="icon-button"
+                aria-label="Organize tabs with Jev"
+                title="Organize tabs with AI"
+                onClick={() =>
+                  run({
+                    type: 'ai.classify',
+                    tabIds: state.tabs.map((t) => t.id),
+                  })
+                }
+                disabled={!state.connected}
+              >
+                <Icon name="sparkles" size={14} />
+              </button>
+            )}
           </div>
         </header>
         <WorkspaceSelector run={run} client={client} />
@@ -464,6 +480,15 @@ export function Sidebar({
             <Settings
               preferences={preferences}
               update={(patch) => run({ type: 'preferences.update', patch })}
+              aiSettings={
+                state.metadata?.aiSettings ?? {
+                  connected: false,
+                  status: 'disconnected',
+                }
+              }
+              updateAiSettings={async (patch) => {
+                await client.command({ type: 'ai.settings.update', patch });
+              }}
             />
           </div>
         ) : bookmarks ? (
