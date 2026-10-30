@@ -15,6 +15,7 @@ import { pageControls } from '../lib/page-controls';
 import { Pinned } from './Pinned';
 import { useTheme } from './theme';
 import { allowDrag, readDrag, startDrag } from './drag';
+import { AISuggestionsPanel } from './AISuggestionsPanel';
 
 function TabRow({
   tab,
@@ -92,6 +93,7 @@ export function Sidebar({
   const [focused, setFocused] = useState(false);
   const [pinPending, setPinPending] = useState(false);
   const [bookmarks, setBookmarks] = useState(false);
+  const [showAIPanel, setShowAIPanel] = useState(false);
   const [forcedReveal, setForcedReveal] = useState(false);
   const hover = useMemo(() => new HoverController(setOpen), []);
   const [client] = useState(
@@ -120,6 +122,26 @@ export function Sidebar({
             setOpen(true);
           }
           if (event.windowState.nativePanelOpen) setPinPending(false);
+        } else if (event.type === 'ai.loading') {
+          useSidebar.getState().ai.setLoading(true, event.loadingType);
+        } else if (event.type === 'ai.error') {
+          useSidebar.getState().ai.setLoading(false);
+          useSidebar.getState().setError(event.error);
+        } else if (event.type === 'ai.classify.result') {
+          useSidebar.getState().ai.setLoading(false);
+          useSidebar.getState().ai.setClassifications(event.classifications);
+        } else if (event.type === 'ai.route.result') {
+          useSidebar.getState().ai.setLoading(false);
+          useSidebar.getState().ai.setRecommendations(event.recommendations);
+        } else if (event.type === 'ai.group.result') {
+          useSidebar.getState().ai.setLoading(false);
+          useSidebar.getState().ai.setGroups(event.groups);
+        } else if (event.type === 'ai.focus.result') {
+          useSidebar.getState().ai.setLoading(false);
+          useSidebar.getState().ai.setFocusRelevance(event.relevance);
+        } else if (event.type === 'ai.cleanup.result') {
+          useSidebar.getState().ai.setLoading(false);
+          useSidebar.getState().ai.setCleanupSuggestions(event.suggestions);
         }
         useSidebar.getState().receive(event);
       }, useSidebar.getState().setConnected),
@@ -175,9 +197,16 @@ export function Sidebar({
       .filter((e) => e.workspaceId === state.metadata?.activeWorkspaceId)
       .map((e) => e.url),
   );
-  const tabs = searchTabs(state.tabs, state.query).filter(
+  const { focusMode, focusRelevance } = state.ai;
+  const relevantTabIds = focusMode
+    ? new Set(focusRelevance.filter((r) => r.score >= 0.5).map((r) => r.tabId))
+    : null;
+  let tabs = searchTabs(state.tabs, state.query).filter(
     (tab) => !pinnedUrls.has(tab.url),
   );
+  if (focusMode && relevantTabIds) {
+    tabs = tabs.filter((tab) => relevantTabIds.has(tab.id));
+  }
   const run = (command: Command) => {
     state.setError(undefined);
     const pinning =
@@ -495,6 +524,10 @@ export function Sidebar({
           <div className="scroll-area">
             <Bookmarks client={client} />
           </div>
+        ) : showAIPanel ? (
+          <div className="scroll-area">
+            <AISuggestionsPanel client={client} />
+          </div>
         ) : (
           <>
             <div className="search-box flex items-center gap-2">
@@ -555,12 +588,26 @@ export function Sidebar({
                 }}
               >
                 <div className="section-label">
-                  {state.query ? 'SEARCH RESULTS' : 'TODAY'}
+                  {state.query
+                    ? 'SEARCH RESULTS'
+                    : state.ai.focusMode
+                      ? 'FOCUS MODE'
+                      : 'TODAY'}
                   <span className="tab-count">
                     {state.query
                       ? `${tabs.length} / ${state.tabs.length}`
-                      : state.tabs.length}
+                      : state.ai.focusMode
+                        ? `${tabs.length} / ${state.tabs.length}`
+                        : state.tabs.length}
                   </span>
+                  {state.ai.focusMode && (
+                    <button
+                      className="text-button small"
+                      onClick={() => state.ai.setFocusMode(false)}
+                    >
+                      Show All
+                    </button>
+                  )}
                 </div>
                 {!state.metadata && !state.error ? (
                   <div className="empty-state" role="status">
@@ -605,6 +652,7 @@ export function Sidebar({
             aria-pressed={bookmarks}
             onClick={() => {
               state.setSettings(false);
+              setShowAIPanel(false);
               setBookmarks(!bookmarks);
             }}
           >
@@ -618,10 +666,28 @@ export function Sidebar({
             className={`icon-button ${state.settings ? 'selected' : ''}`}
             aria-label={state.settings ? 'Back to tabs' : 'Open settings'}
             aria-pressed={state.settings}
-            onClick={() => state.setSettings(!state.settings)}
+            onClick={() => {
+              state.setSettings(!state.settings);
+              setShowAIPanel(false);
+              setBookmarks(false);
+            }}
           >
             <Icon name={state.settings ? 'arrow' : 'settings'} size={17} />
           </button>
+          {state.metadata?.aiSettings?.status === 'connected' && (
+            <button
+              className={`icon-button ${showAIPanel ? 'selected' : ''}`}
+              aria-label={showAIPanel ? 'Back to tabs' : 'AI suggestions'}
+              aria-pressed={showAIPanel}
+              onClick={() => {
+                setShowAIPanel(!showAIPanel);
+                state.setSettings(false);
+                setBookmarks(false);
+              }}
+            >
+              <Icon name="sparkles" size={17} />
+            </button>
+          )}
         </footer>
       </aside>
     </div>

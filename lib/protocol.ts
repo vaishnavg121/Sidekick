@@ -115,7 +115,32 @@ export type ServerEvent =
       windowId: number;
       windowState: WindowUiState;
     }
-  | { type: 'error'; error: string };
+  | { type: 'error'; error: string }
+  | {
+      type: 'ai.classify.result';
+      classifications: TabClassification[];
+    }
+  | {
+      type: 'ai.route.result';
+      recommendations: WorkspaceRecommendation[];
+    }
+  | {
+      type: 'ai.group.result';
+      groups: RelatedTabGroup[];
+    }
+  | {
+      type: 'ai.focus.result';
+      relevance: FocusRelevance[];
+    }
+  | {
+      type: 'ai.cleanup.result';
+      suggestions: CleanupSuggestion[];
+    }
+  | {
+      type: 'ai.loading';
+      loadingType: 'classify' | 'route' | 'group' | 'focus' | 'cleanup';
+    }
+  | { type: 'ai.error'; error: string; loadingType?: string };
 export function isCommand(value: unknown): value is Command {
   if (!value || typeof value !== 'object') return false;
   const c = value as Record<string, unknown>;

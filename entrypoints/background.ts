@@ -416,8 +416,16 @@ export default defineBackground(() => {
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              await aiService.classifyTabs(targetTabs);
-              // Results are cached and will be sent via next refresh
+              const classifications = await aiService.classifyTabs(targetTabs);
+              // Send results back to client
+              for (const port of clients.keys()) {
+                if (clients.get(port) === windowId) {
+                  send(port, {
+                    type: 'ai.classify.result',
+                    classifications,
+                  } as ServerEvent);
+                }
+              }
               break;
             }
             case 'ai.route': {
@@ -426,7 +434,18 @@ export default defineBackground(() => {
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              await aiService.routeTabs(targetTabs, metadata.workspaces);
+              const recommendations = await aiService.routeTabs(
+                targetTabs,
+                metadata.workspaces,
+              );
+              for (const port of clients.keys()) {
+                if (clients.get(port) === windowId) {
+                  send(port, {
+                    type: 'ai.route.result',
+                    recommendations,
+                  } as ServerEvent);
+                }
+              }
               break;
             }
             case 'ai.group': {
@@ -434,7 +453,15 @@ export default defineBackground(() => {
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              await aiService.groupTabs(targetTabs);
+              const groups = await aiService.groupTabs(targetTabs);
+              for (const port of clients.keys()) {
+                if (clients.get(port) === windowId) {
+                  send(port, {
+                    type: 'ai.group.result',
+                    groups,
+                  } as ServerEvent);
+                }
+              }
               break;
             }
             case 'ai.focus': {
@@ -442,7 +469,15 @@ export default defineBackground(() => {
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              await aiService.scoreFocus(targetTabs, c.goal);
+              const relevance = await aiService.scoreFocus(targetTabs, c.goal);
+              for (const port of clients.keys()) {
+                if (clients.get(port) === windowId) {
+                  send(port, {
+                    type: 'ai.focus.result',
+                    relevance,
+                  } as ServerEvent);
+                }
+              }
               break;
             }
             case 'ai.cleanup': {
@@ -450,7 +485,15 @@ export default defineBackground(() => {
                 .map(toTabItem)
                 .filter((t): t is TabItem => !!t);
               const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              await aiService.suggestCleanup(targetTabs);
+              const suggestions = await aiService.suggestCleanup(targetTabs);
+              for (const port of clients.keys()) {
+                if (clients.get(port) === windowId) {
+                  send(port, {
+                    type: 'ai.cleanup.result',
+                    suggestions,
+                  } as ServerEvent);
+                }
+              }
               break;
             }
             case 'ai.apply.classification': {
