@@ -9,56 +9,66 @@ import type {
 } from './models';
 import type { TabItem } from './tabs';
 
-const JEV_GATEWAY_URL = 'https://api.vercel.ai/v1/evaluate';
+// Vercel AI Gateway Jev endpoint
+const JEV_GATEWAY_URL = 'https://ai-gateway.vercel.sh/v1/evaluate';
+const JEV_MODEL = 'typesafe-ai/jev';
 
-interface JevRequest {
-  model: string;
-  input: {
-    prompt: string;
-    context?: Record<string, unknown>;
-  };
+// Jev question types
+type JevQuestionType = 'choice' | 'score' | 'boolean';
+
+interface JevQuestion {
+  name: string;
+  type: JevQuestionType;
+  prompt: string;
   options?: {
-    temperature?: number;
-    maxTokens?: number;
+    choices?: readonly string[];
+    min?: number;
+    max?: number;
+    step?: number;
   };
 }
 
+interface JevRequest {
+  model: string;
+  questions: JevQuestion[];
+  inputs: Array<Record<string, unknown>>;
+}
+
+interface JevChoiceResult {
+  type: 'choice';
+  name: string;
+  value: string;
+  probability: number;
+}
+
+interface JevScoreResult {
+  type: 'score';
+  name: string;
+  value: number;
+  normalized: number;
+}
+
+interface JevBooleanResult {
+  type: 'boolean';
+  name: string;
+  value: boolean;
+  probability: number;
+}
+
+type JevResult = JevChoiceResult | JevScoreResult | JevBooleanResult;
+
 interface JevResponse {
-  output: {
-    choices: Array<{
-      message: {
-        content: string;
-        role: string;
-      };
-    }>;
-  };
+  results: Array<{
+    input: Record<string, unknown>;
+    results: JevResult[];
+  }>;
   usage?: {
     promptTokens: number;
     completionTokens: number;
   };
 }
 
-interface ClassificationResult {
-  classifications: TabClassification[];
-}
-
-interface RoutingResult {
-  recommendations: WorkspaceRecommendation[];
-}
-
-interface GroupResult {
-  groups: RelatedTabGroup[];
-}
-
-interface FocusResult {
-  relevance: FocusRelevance[];
-}
-
-interface CleanupResult {
-  suggestions: CleanupSuggestion[];
-}
-
-const DEFAULT_CATEGORIES: TabCategory[] = [
+const DEFAULT_CATEGORIES = [
   'Development',
   'Research',
   'Education',
@@ -68,96 +78,45 @@ const DEFAULT_CATEGORIES: TabCategory[] = [
   'Shopping',
   'Communication',
   'Other',
-];
+] as const satisfies readonly TabCategory[];
 
-const CLASSIFICATION_PROMPT = `You are an expert at categorizing browser tabs. Analyze the provided tabs and classify each into exactly one category.
+// Use choice questions for classification and routing (discrete decisions)
+const CLASSIFICATION_QUESTION: JevQuestion = {
+  name: 'classification',
+  type: 'choice',
+  prompt:
+    'Classify this browser tab into exactly one category based on its title and domain.',
+  options: {
+    choices: DEFAULT_CATEGORIES,
+  },
+};
 
-Categories: {categories}
+const ROUTING_QUESTION: JevQuestion = {
+  name: 'routing',
+  type: 'choice',
+  prompt:
+    'Select the best workspace for this tab from the available workspaces.',
+  // choices will be set dynamically per request
+  options: { choices: [] },
+};
 
-For each tab, provide:
-- category: One of the categories above
-- confidence: 0.0 to 1.0
-- reasoning: Brief explanation (max 50 chars)
+const FOCUS_QUESTION: JevQuestion = {
+  name: 'focus',
+  type: 'score',
+  prompt:
+    "Score how relevant this tab is to the user's focus goal. 0 = not relevant, 1 = highly relevant.",
+  options: { min: 0, max: 1, step: 0.1 },
+};
 
-Return ONLY valid JSON matching this TypeScript interface:
-{
-  "classifications": [
-    { "tabId": number, "category": string, "confidence": number, "reasoning": string }
-  ]
-}
-
-Tabs to classify:`;
-
-const ROUTING_PROMPT = `You are an expert at organizing browser tabs into workspaces. Analyze the tabs and recommend the best existing workspace for each.
-
-Available workspaces: {workspaces}
-
-For each tab, provide:
-- workspaceId: The ID of the recommended workspace
-- workspaceName: The name of that workspace
-- reason: Brief explanation (max 80 chars)
-- confidence: 0.0 to 1.0
-
-Return ONLY valid JSON matching this TypeScript interface:
-{
-  "recommendations": [
-    { "tabId": number, "workspaceId": string, "workspaceName": string, "reason": string, "confidence": number }
-  ]
-}
-
-Tabs to route:`;
-
-const GROUPING_PROMPT = `You are an expert at identifying related browser tabs. Group tabs that discuss the same project, topic, or task.
-
-For each group, provide:
-- tabs: Array of tab IDs in this group
-- topic: Short topic name (max 30 chars)
-- description: Brief description (max 100 chars)
-
-Only create groups with 2+ tabs. Avoid duplicating existing folder structures.
-
-Return ONLY valid JSON matching this TypeScript interface:
-{
-  "groups": [
-    { "tabs": number[], "topic": string, "description": string }
-  ]
-}
-
-Tabs to analyze:`;
-
-const FOCUS_PROMPT = `You are an expert at filtering browser tabs for focus. Score each tab's relevance to the user's goal.
-
-User's focus goal: "{goal}"
-
-For each tab, provide:
-- tabId: The tab's ID
-- score: 0.0 to 1.0 (1.0 = highly relevant)
-- reason: Brief explanation (max 60 chars)
-
-Return ONLY valid JSON matching this TypeScript interface:
-{
-  "relevance": [
-    { "tabId": number, "score": number, "reason": string }
-  ]
-}
-
-Tabs to score:`;
-
-const CLEANUP_PROMPT = `You are an expert at identifying tabs to clean up. Detect semantic duplicates, stale content, and low-value tabs.
-
-For each suggestion, provide:
-- type: "duplicate" | "stale" | "low-value"
-- tabIds: Array of tab IDs
-- description: Brief explanation (max 80 chars)
-
-Return ONLY valid JSON matching this TypeScript interface:
-{
-  "suggestions": [
-    { "type": string, "tabIds": number[], "description": string }
-  ]
-}
-
-Tabs to analyze:`;
+const CLEANUP_QUESTION: JevQuestion = {
+  name: 'cleanup',
+  type: 'choice',
+  prompt:
+    'Should this tab be cleaned up? Choose the type of cleanup if applicable.',
+  options: {
+    choices: ['keep', 'duplicate', 'stale', 'low-value'],
+  },
+};
 
 export class AiService {
   private gatewayKey: string | undefined;
@@ -175,11 +134,18 @@ export class AiService {
     key: string,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
+      // Test with a simple boolean question to verify Jev access
       await this.callJev(
         {
-          model: 'gpt-4o-mini',
-          input: { prompt: 'Return "ok" if you can read this.' },
-          options: { maxTokens: 10 },
+          model: JEV_MODEL,
+          questions: [
+            {
+              name: 'test',
+              type: 'boolean',
+              prompt: 'Return true.',
+            },
+          ],
+          inputs: [{}],
         },
         key,
       );
@@ -187,7 +153,8 @@ export class AiService {
     } catch (error) {
       return {
         ok: false,
-        error: error instanceof Error ? error.message : 'Verification failed',
+        error:
+          error instanceof Error ? error.message : 'Jev verification failed',
       };
     }
   }
@@ -213,7 +180,14 @@ export class AiService {
       throw new Error(`Jev API error: ${response.status} ${error}`);
     }
 
-    return response.json() as Promise<JevResponse>;
+    const data = (await response.json()) as JevResponse;
+
+    // Validate response structure
+    if (!data.results || !Array.isArray(data.results)) {
+      throw new Error('Invalid Jev response: missing results array');
+    }
+
+    return data;
   }
 
   private async enqueue<T>(fn: () => Promise<T>): Promise<T> {
@@ -283,6 +257,62 @@ export class AiService {
     }
   }
 
+  private buildJevInputs(tabs: TabItem[]): Array<Record<string, unknown>> {
+    return tabs.map(this.sanitizeTab);
+  }
+
+  private extractChoiceResult(
+    results: JevResult[],
+    questionName: string,
+  ): string | null {
+    const result = results.find(
+      (r) => r.name === questionName && r.type === 'choice',
+    );
+    if (result && result.type === 'choice') {
+      return result.value;
+    }
+    return null;
+  }
+
+  private extractScoreResult(
+    results: JevResult[],
+    questionName: string,
+  ): number | null {
+    const result = results.find(
+      (r) => r.name === questionName && r.type === 'score',
+    );
+    if (result && result.type === 'score') {
+      return result.value;
+    }
+    return null;
+  }
+
+  private extractBooleanResult(
+    results: JevResult[],
+    questionName: string,
+  ): boolean | null {
+    const result = results.find(
+      (r) => r.name === questionName && r.type === 'boolean',
+    );
+    if (result && result.type === 'boolean') {
+      return result.value;
+    }
+    return null;
+  }
+
+  private extractChoiceProbability(
+    results: JevResult[],
+    questionName: string,
+  ): number {
+    const result = results.find(
+      (r) => r.name === questionName && r.type === 'choice',
+    );
+    if (result && result.type === 'choice') {
+      return result.probability;
+    }
+    return 0;
+  }
+
   async classifyTabs(
     tabs: TabItem[],
     customCategories?: TabCategory[],
@@ -292,28 +322,59 @@ export class AiService {
     const cached = this.getFromCache<TabClassification[]>(cacheKey);
     if (cached) return cached;
 
-    const categories = customCategories ?? DEFAULT_CATEGORIES;
-    const prompt =
-      CLASSIFICATION_PROMPT.replace('{categories}', categories.join(', ')) +
-      '\n' +
-      JSON.stringify(tabs.map(this.sanitizeTab), null, 2);
+    const categories: readonly TabCategory[] =
+      customCategories ?? DEFAULT_CATEGORIES;
+    const question: JevQuestion = {
+      ...CLASSIFICATION_QUESTION,
+      options: { choices: [...categories] },
+    };
 
     return this.enqueue(async () => {
       const response = await this.callJev({
-        model: 'gpt-4o-mini',
-        input: { prompt },
-        options: { temperature: 0.1, maxTokens: 2000 },
+        model: JEV_MODEL,
+        questions: [question],
+        inputs: this.buildJevInputs(tabs),
       });
 
-      const content = response.output.choices[0]?.message?.content ?? '{}';
-      const parsed = JSON.parse(content) as ClassificationResult;
+      const results: TabClassification[] = [];
+      for (let i = 0; i < tabs.length; i++) {
+        const resultEntry = response.results[i];
+        if (!resultEntry) continue;
+        const inputResults = resultEntry.results ?? [];
+        const category = this.extractChoiceResult(
+          inputResults,
+          'classification',
+        );
+        const confidence = this.extractChoiceProbability(
+          inputResults,
+          'classification',
+        );
 
-      const results = parsed.classifications
-        .filter((c) => categories.includes(c.category as TabCategory))
-        .map((c) => ({
-          ...c,
-          confidence: Math.max(0, Math.min(1, c.confidence)),
-        }));
+        const cat = category;
+        // categories is guaranteed non-empty (DEFAULT_CATEGORIES has 9 elements)
+        const fallbackCategory = (categories as TabCategory[])[0]!;
+        const catNonNull = cat !== null ? cat : null;
+        const catForInclude = catNonNull!;
+        if (
+          catNonNull !== null &&
+          (categories as TabCategory[]).includes(catForInclude as TabCategory)
+        ) {
+          results.push({
+            tabId: tabs[i]!.id,
+            category: catNonNull as TabCategory,
+            confidence,
+            reasoning: `Jev classified as ${catNonNull}`,
+          });
+        } else {
+          // Fallback to first category if classification fails
+          results.push({
+            tabId: tabs[i]!.id,
+            category: fallbackCategory,
+            confidence: 0,
+            reasoning: 'Classification failed, defaulted',
+          });
+        }
+      }
 
       // Merge with existing user classifications (user overrides AI)
       const merged = [...results];
@@ -323,9 +384,9 @@ export class AiService {
         )) {
           const idx = merged.findIndex((c) => c.tabId === Number(tabId));
           if (idx >= 0) {
-            merged[idx] = userCls; // User override wins
+            merged[idx] = userCls;
           } else {
-            merged.push(userCls); // User classified a tab AI didn't
+            merged.push(userCls);
           }
         }
       }
@@ -343,37 +404,52 @@ export class AiService {
     const cached = this.getFromCache<WorkspaceRecommendation[]>(cacheKey);
     if (cached) return cached;
 
-    const prompt =
-      ROUTING_PROMPT.replace(
-        '{workspaces}',
-        JSON.stringify(
-          workspaces.map((w) => ({
-            id: w.id,
-            name: w.name,
-            description: `${w.name} workspace`,
-          })),
-        ),
-      ) +
-      '\n' +
-      JSON.stringify(tabs.map(this.sanitizeTab), null, 2);
+    if (workspaces.length === 0) {
+      return [];
+    }
+
+    const workspaceChoices = workspaces.map((w) => `${w.id}:${w.name}`);
+    const question: JevQuestion = {
+      ...ROUTING_QUESTION,
+      options: { choices: workspaceChoices },
+    };
 
     return this.enqueue(async () => {
       const response = await this.callJev({
-        model: 'gpt-4o-mini',
-        input: { prompt },
-        options: { temperature: 0.1, maxTokens: 2000 },
+        model: JEV_MODEL,
+        questions: [question],
+        inputs: this.buildJevInputs(tabs),
       });
 
-      const content = response.output.choices[0]?.message?.content ?? '{}';
-      const parsed = JSON.parse(content) as RoutingResult;
-
       const validWorkspaceIds = new Set(workspaces.map((w) => w.id));
-      const results = parsed.recommendations
-        .filter((r) => validWorkspaceIds.has(r.workspaceId))
-        .map((r) => ({
-          ...r,
-          confidence: Math.max(0, Math.min(1, r.confidence)),
-        }));
+      const results: WorkspaceRecommendation[] = [];
+
+      for (let i = 0; i < tabs.length; i++) {
+        const resultEntry = response.results[i];
+        if (!resultEntry) continue;
+        const inputResults = resultEntry.results ?? [];
+        const choice = this.extractChoiceResult(inputResults, 'routing');
+        const confidence = this.extractChoiceProbability(
+          inputResults,
+          'routing',
+        );
+
+        if (choice !== null) {
+          const choiceStr = choice as string;
+          const parts = choiceStr.split(':');
+          const workspaceId = parts[0]!;
+          const workspace = workspaces.find((w) => w.id === workspaceId)!;
+          if (workspaceId && validWorkspaceIds.has(workspaceId)) {
+            results.push({
+              tabId: tabs[i]!.id,
+              workspaceId,
+              workspaceName: workspace.name,
+              reason: `Jev routed to ${workspace.name}`,
+              confidence,
+            });
+          }
+        }
+      }
 
       this.setCache(cacheKey, results);
       return results;
@@ -385,26 +461,73 @@ export class AiService {
     const cached = this.getFromCache<RelatedTabGroup[]>(cacheKey);
     if (cached) return cached;
 
-    const prompt =
-      GROUPING_PROMPT +
-      '\n' +
-      JSON.stringify(tabs.map(this.sanitizeTab), null, 2);
+    // For grouping, we'll use a different approach - score pairwise similarity
+    // Since Jev choice questions work on individual inputs, we need a different strategy
+    // We'll use a single choice question per tab about its topic
+    const topicQuestion: JevQuestion = {
+      name: 'topic',
+      type: 'choice',
+      prompt:
+        'What is the main topic of this tab? Choose the most specific topic.',
+      options: {
+        choices: [
+          'C++ development',
+          'React development',
+          'TypeScript development',
+          'Python development',
+          'Rust development',
+          'Web development',
+          'API design',
+          'Database',
+          'Testing',
+          'Documentation',
+          'Tutorial',
+          'Reference',
+          'News',
+          'Social media',
+          'Entertainment',
+          'Shopping',
+          'Email',
+          'Chat',
+          'Video call',
+          'Project management',
+          'Other',
+        ],
+      },
+    };
 
     return this.enqueue(async () => {
       const response = await this.callJev({
-        model: 'gpt-4o-mini',
-        input: { prompt },
-        options: { temperature: 0.2, maxTokens: 2000 },
+        model: JEV_MODEL,
+        questions: [topicQuestion],
+        inputs: this.buildJevInputs(tabs),
       });
 
-      const content = response.output.choices[0]?.message?.content ?? '{}';
-      const parsed = JSON.parse(content) as GroupResult;
+      // Group tabs by their assigned topic
+      const topicGroups = new Map<string, number[]>();
+      for (let i = 0; i < tabs.length; i++) {
+        const resultEntry = response.results[i];
+        if (!resultEntry) continue;
+        const inputResults = resultEntry.results ?? [];
+        const topic = this.extractChoiceResult(inputResults, 'topic');
+        if (topic !== null && topic !== 'Other') {
+          const existingGroup = topicGroups.get(topic)!;
+          const group = existingGroup ? existingGroup : [];
+          group.push(tabs[i]!.id);
+          topicGroups.set(topic, group);
+        }
+      }
 
-      const results = parsed.groups
-        .filter((g) => g.tabs.length >= 2)
-        .filter((g) =>
-          g.tabs.every((id: number) => tabs.some((t) => t.id === id)),
-        );
+      const results: RelatedTabGroup[] = [];
+      for (const [topic, tabIds] of topicGroups) {
+        if (tabIds.length >= 2) {
+          results.push({
+            tabs: tabIds,
+            topic: topic.slice(0, 30),
+            description: `Tabs related to ${topic}`,
+          });
+        }
+      }
 
       this.setCache(cacheKey, results);
       return results;
@@ -416,27 +539,37 @@ export class AiService {
     const cached = this.getFromCache<FocusRelevance[]>(cacheKey);
     if (cached) return cached;
 
-    const prompt =
-      FOCUS_PROMPT.replace('{goal}', goal) +
-      '\n' +
-      JSON.stringify(tabs.map(this.sanitizeTab), null, 2);
+    const question: JevQuestion = {
+      ...FOCUS_QUESTION,
+      prompt: `Score how relevant this tab is to the user's focus goal: "${goal}". 0 = not relevant, 1 = highly relevant.`,
+    };
 
     return this.enqueue(async () => {
       const response = await this.callJev({
-        model: 'gpt-4o-mini',
-        input: { prompt },
-        options: { temperature: 0.1, maxTokens: 2000 },
+        model: JEV_MODEL,
+        questions: [question],
+        inputs: this.buildJevInputs(tabs),
       });
 
-      const content = response.output.choices[0]?.message?.content ?? '{}';
-      const parsed = JSON.parse(content) as FocusResult;
+      const results: FocusRelevance[] = [];
+      for (let i = 0; i < tabs.length; i++) {
+        const resultEntry = response.results[i]!;
+        const inputResults = resultEntry.results ?? [];
+        const score = this.extractScoreResult(inputResults, 'focus');
 
-      const results = parsed.relevance
-        .filter((r) => tabs.some((t) => t.id === r.tabId))
-        .map((r) => ({
-          ...r,
-          score: Math.max(0, Math.min(1, r.score)),
-        }));
+        if (score !== null) {
+          results.push({
+            tabId: tabs[i]!.id,
+            score: Math.max(0, Math.min(1, score)),
+            reason:
+              score >= 0.7
+                ? 'Highly relevant to focus goal'
+                : score >= 0.4
+                  ? 'Moderately relevant'
+                  : 'Low relevance',
+          });
+        }
+      }
 
       this.setCache(cacheKey, results);
       return results;
@@ -465,33 +598,46 @@ export class AiService {
       if (ids.length > 1) {
         localDuplicates.push({
           type: 'duplicate',
-          tabIds: ids.slice(1), // Keep first, suggest removing rest
+          tabIds: ids.slice(1),
           description: `Exact duplicate of ${url}`,
         });
       }
     }
 
-    // Use Jev for semantic similarity
+    // Use Jev for semantic cleanup detection
     const cacheKey = this.getCacheKey('cleanup', tabs);
     const cached = this.getFromCache<CleanupSuggestion[]>(cacheKey);
     if (cached) return [...localDuplicates, ...cached];
 
-    const prompt =
-      CLEANUP_PROMPT +
-      '\n' +
-      JSON.stringify(tabs.map(this.sanitizeTab), null, 2);
+    const question: JevQuestion = {
+      ...CLEANUP_QUESTION,
+      prompt:
+        'Should this tab be cleaned up? Choose the type of cleanup if applicable.',
+    };
 
     const semantic = await this.enqueue(async () => {
       const response = await this.callJev({
-        model: 'gpt-4o-mini',
-        input: { prompt },
-        options: { temperature: 0.2, maxTokens: 2000 },
+        model: JEV_MODEL,
+        questions: [question],
+        inputs: this.buildJevInputs(tabs),
       });
 
-      const content = response.output.choices[0]?.message?.content ?? '{}';
-      const parsed = JSON.parse(content) as CleanupResult;
+      const results: CleanupSuggestion[] = [];
+      for (let i = 0; i < tabs.length; i++) {
+        const resultEntry = response.results[i]!;
+        const inputResults = resultEntry.results ?? [];
+        const choice = this.extractChoiceResult(inputResults, 'cleanup');
 
-      return parsed.suggestions
+        if (choice !== null && choice !== 'keep') {
+          results.push({
+            type: choice as CleanupSuggestion['type'],
+            tabIds: [tabs[i]!.id],
+            description: `Jev suggested ${choice}`,
+          });
+        }
+      }
+
+      return results
         .filter((s) => s.tabIds.length > 0)
         .filter((s) =>
           s.tabIds.every((id: number) => tabs.some((t) => t.id === id)),
