@@ -7,6 +7,7 @@ import type {
   CleanupSuggestion,
   WorkspaceRecommendation,
   FocusRelevance,
+  RelatedTabGroup,
 } from '../lib/models';
 
 function createMockTabs(): TabItem[] {
@@ -468,7 +469,7 @@ describe('AiService - semantic grouping', () => {
     const service = new AiService();
     service.setGatewayKey('test-key');
 
-    const results = await service.groupTabs(tabs);
+    const results: RelatedTabGroup[] = await service.groupTabs(tabs);
 
     expect(results).toHaveLength(1);
     const group = results[0]!;
@@ -504,7 +505,7 @@ describe('AiService - semantic grouping', () => {
 
     const service = new AiService();
     service.setGatewayKey('test-key');
-    const results = await service.groupTabs(tabs);
+    const results: RelatedTabGroup[] = await service.groupTabs(tabs);
 
     // No groups with 2+ tabs sharing the same topic
     expect(results).toHaveLength(0);
@@ -606,7 +607,7 @@ describe('AiService - safe cleanup', () => {
 
     const service = new AiService();
     service.setGatewayKey('test-key');
-    const results = await service.suggestCleanup(tabs);
+    const results: CleanupSuggestion[] = await service.suggestCleanup(tabs);
 
     // Different query params = different URLs = not exact duplicates
     expect(results).toHaveLength(0);
