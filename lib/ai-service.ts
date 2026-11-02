@@ -89,19 +89,6 @@ interface JevAnswer {
   type: 'boolean' | 'choice' | 'score';
 }
 
-interface JevChoiceAnswer extends JevAnswer {
-  type: 'choice';
-  choice: string;
-  probabilities: Record<string, number>;
-}
-
-interface JevScoreAnswer extends JevAnswer {
-  type: 'score';
-  score: number;
-  normalized: number;
-  probabilities: Record<string, number>;
-}
-
 const DEFAULT_CATEGORIES = [
   'Development',
   'Research',
@@ -139,6 +126,50 @@ const TOPIC_CHOICES = [
 ] as const;
 
 const MAX_BATCH_SIZE = 20; // Maximum tabs per Jev request to avoid oversized requests
+
+function validateChoiceAnswer(
+  answer: unknown,
+  allowedChoices: string[],
+): {
+  choice: string;
+  probabilities: Record<string, number>;
+  confidence: number;
+} | null {
+  if (!answer || typeof answer !== 'object') return null;
+  const a = answer as Record<string, unknown>;
+  if (a.type !== 'choice') return null;
+  if (typeof a.choice !== 'string') return null;
+  if (!allowedChoices.includes(a.choice)) return null;
+  const probabilities = a.probabilities as Record<string, number> | undefined;
+  if (!probabilities || typeof probabilities !== 'object') return null;
+  const confidence = probabilities[a.choice] ?? 0;
+  if (typeof confidence !== 'number' || confidence < 0 || confidence > 1)
+    return null;
+  return { choice: a.choice, probabilities, confidence };
+}
+
+function validateScoreAnswer(
+  answer: unknown,
+): { score: number; normalized: number } | null {
+  if (!answer || typeof answer !== 'object') return null;
+  const a = answer as Record<string, unknown>;
+  if (a.type !== 'score') return null;
+  const score = a.score as number | undefined;
+  const normalized = a.normalized as number | undefined;
+  if (typeof score !== 'number' || score < 0 || score > 5) return null;
+  if (typeof normalized !== 'number' || normalized < 0 || normalized > 1)
+    return null;
+  return { score, normalized };
+}
+
+function escapeHtmlEntities(text: string): string {
+  return text
+    .replace(/&/g, '&')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#039;');
+}
 
 export class AiService {
   private gatewayKey: string | undefined;
@@ -236,11 +267,15 @@ export class AiService {
     }
   }
 
-  private getCacheKey(prefix: string, tabs: TabItem[]): string {
+  private getCacheKey(
+    prefix: string,
+    tabs: TabItem[],
+    extraKey?: string,
+  ): string {
     const metadata = tabs
       .map((t) => `${t.id}:${t.url}:${t.title.slice(0, 50)}`)
       .join('|');
-    return `${prefix}:${metadata}`;
+    return `${prefix}:${metadata}${extraKey ? `:${extraKey}` : ''}`;
   }
 
   private getFromCache<T>(key: string): T | undefined {
@@ -258,23 +293,10 @@ export class AiService {
   private sanitizeTab(tab: TabItem): string {
     try {
       const url = new URL(tab.url);
-      // Escape HTML entities in title to prevent XSS in state
-      const safeTitle = tab.title
-        .slice(0, 100)
-        .replace(/&/g, '&')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+      const safeTitle = escapeHtmlEntities(tab.title.slice(0, 100));
       return `${tab.id}:${safeTitle} | ${url.hostname}`;
     } catch {
-      const safeTitle = tab.title
-        .slice(0, 100)
-        .replace(/&/g, '&')
-        .replace(/</g, '&lt;')
-        .replace(/>/g, '&gt;')
-        .replace(/"/g, '&quot;')
-        .replace(/'/g, '&#039;');
+      const safeTitle = escapeHtmlEntities(tab.title.slice(0, 100));
       return `${tab.id}:${safeTitle} | unknown`;
     }
   }
@@ -286,21 +308,30 @@ export class AiService {
   /**
    * Classify tabs by creating a separate choice question for each tab.
    * Each question is named with the tab ID to map results back.
+   * Instructions explicitly reference the target tab by its ID and title.
    */
   async classifyTabs(
     tabs: TabItem[],
     customCategories?: TabCategory[],
     existingClassifications?: Record<number, TabClassification>,
   ): Promise<TabClassification[]> {
-    const cacheKey = this.getCacheKey('classify', tabs);
+    const categories = customCategories ?? DEFAULT_CATEGORIES;
+    const categoriesKey = categories.join(',');
+    const overridesKey = existingClassifications
+      ? Object.entries(existingClassifications)
+          .map(([id, cls]) => `${id}:${cls.category}`)
+          .join('|')
+      : '';
+    const extraKey = `cats:${categoriesKey}${overridesKey ? `|overrides:${overridesKey}` : ''}`;
+    const cacheKey = this.getCacheKey('classify', tabs, extraKey);
     const cached = this.getFromCache<TabClassification[]>(cacheKey);
     if (cached) return cached;
 
-    const categories = customCategories ?? DEFAULT_CATEGORIES;
     const criteria: Record<string, string> = {};
     for (const cat of categories) {
       criteria[cat] = cat;
     }
+    const allowedChoices = [...categories];
 
     // Process in batches to avoid oversized requests
     const results: TabClassification[] = [];
@@ -316,8 +347,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`classify_${tab.id}`] = {
           type: 'choice',
-          instructions:
-            'Classify this browser tab into exactly one category based on its title and domain.',
+          instructions: `Classify the browser tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") into exactly one category based on its title and domain.`,
           criteria,
         };
       }
@@ -330,26 +360,23 @@ export class AiService {
 
       // Map answers back to tabs using question IDs
       for (const tab of batch) {
-        const answer = response.answers[`classify_${tab.id}`] as
-          JevChoiceAnswer | undefined;
-        const category = answer?.choice;
-        const probabilities = answer?.probabilities ?? {};
-        const confidence = category ? (probabilities[category] ?? 0) : 0;
+        const answer = response.answers[`classify_${tab.id}`];
+        const validated = validateChoiceAnswer(answer, allowedChoices);
 
-        if (category && categories.includes(category as TabCategory)) {
+        if (validated) {
           results.push({
             tabId: tab.id,
-            category: category as TabCategory,
-            confidence,
-            reasoning: `Jev classified as ${category}`,
+            category: validated.choice as TabCategory,
+            confidence: validated.confidence,
+            reasoning: `Jev classified as ${validated.choice}`,
           });
         } else {
-          const fallbackCategory = categories[0] as TabCategory;
+          // No valid classification - return unknown with 0 confidence
           results.push({
             tabId: tab.id,
-            category: fallbackCategory,
+            category: 'Other' as TabCategory,
             confidence: 0,
-            reasoning: 'Classification failed, defaulted',
+            reasoning: 'Classification failed or returned invalid category',
           });
         }
       }
@@ -374,24 +401,30 @@ export class AiService {
 
   /**
    * Route tabs to workspaces with per-tab evaluation.
-   * Each tab gets its own routing question.
+   * Each tab gets its own routing question with explicit tab reference.
    */
   async routeTabs(
     tabs: TabItem[],
     workspaces: Workspace[],
   ): Promise<WorkspaceRecommendation[]> {
-    const cacheKey = this.getCacheKey('route', tabs);
-    const cached = this.getFromCache<WorkspaceRecommendation[]>(cacheKey);
-    if (cached) return cached;
-
     if (workspaces.length === 0) {
       return [];
     }
+
+    // Include workspace definitions in cache key for invalidation
+    const workspacesKey = workspaces
+      .map((w) => `${w.id}:${w.name}`)
+      .sort()
+      .join('|');
+    const cacheKey = this.getCacheKey('route', tabs, `ws:${workspacesKey}`);
+    const cached = this.getFromCache<WorkspaceRecommendation[]>(cacheKey);
+    if (cached) return cached;
 
     const criteria: Record<string, string> = {};
     for (const ws of workspaces) {
       criteria[ws.id] = ws.name;
     }
+    const allowedChoices = workspaces.map((w) => `${w.id}:${w.name}`);
 
     const results: WorkspaceRecommendation[] = [];
 
@@ -407,8 +440,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`route_${tab.id}`] = {
           type: 'choice',
-          instructions:
-            'Select the best workspace for this tab from the available workspaces.',
+          instructions: `Select the best workspace for the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") from the available workspaces.`,
           criteria,
         };
       }
@@ -422,25 +454,23 @@ export class AiService {
       const validWorkspaceIds = new Set(workspaces.map((w) => w.id));
 
       for (const tab of batch) {
-        const answer = response.answers[`route_${tab.id}`] as
-          JevChoiceAnswer | undefined;
-        const choice = answer?.choice;
-        const probabilities = answer?.probabilities ?? {};
+        const answer = response.answers[`route_${tab.id}`];
+        const validated = validateChoiceAnswer(answer, allowedChoices);
 
-        if (choice) {
-          const workspaceId = choice.split(':')[0]!;
-          const workspace = workspaces.find((w) => w.id === workspaceId)!;
+        if (validated) {
+          const workspaceId = validated.choice.split(':')[0]!;
+          const workspace = workspaces.find((w) => w.id === workspaceId);
           if (workspaceId && workspace && validWorkspaceIds.has(workspaceId)) {
-            const confidence = probabilities[choice] ?? 0;
             results.push({
               tabId: tab.id,
               workspaceId,
               workspaceName: workspace.name,
               reason: `Jev routed to ${workspace.name}`,
-              confidence,
+              confidence: validated.confidence,
             });
           }
         }
+        // If no valid answer, skip routing for this tab (no recommendation)
       }
     }
 
@@ -451,6 +481,7 @@ export class AiService {
   /**
    * Group tabs by creating a topic question per tab, then clustering tabs
    * with matching topics. This provides per-tab topic assignment.
+   * Excludes 'none' and 'Other' from valid generated groups.
    */
   async groupTabs(tabs: TabItem[]): Promise<RelatedTabGroup[]> {
     const cacheKey = this.getCacheKey('group', tabs);
@@ -477,8 +508,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`topic_${tab.id}`] = {
           type: 'choice',
-          instructions:
-            'What is the main topic of this tab? Choose the most specific topic, or "none" if no group fits.',
+          instructions: `What is the main topic of the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}")? Choose the most specific topic, or "none" if no group fits.`,
           criteria: {
             none: 'No group fits this tab',
             ...Object.fromEntries(TOPIC_CHOICES.map((t) => [t, t])),
@@ -493,14 +523,21 @@ export class AiService {
       });
 
       for (const tab of batch) {
-        const answer = response.answers[`topic_${tab.id}`] as
-          JevChoiceAnswer | undefined;
-        const topic = answer?.choice;
-        if (topic && topic !== 'Other') {
-          const existingGroup = topicGroups.get(topic!);
+        const answer = response.answers[`topic_${tab.id}`];
+        const validated = validateChoiceAnswer(answer, [
+          'none',
+          ...TOPIC_CHOICES,
+        ]);
+
+        if (
+          validated &&
+          validated.choice !== 'none' &&
+          validated.choice !== 'Other'
+        ) {
+          const existingGroup = topicGroups.get(validated.choice);
           const group = existingGroup ?? [];
           group.push(tab.id);
-          topicGroups.set(topic!, group);
+          topicGroups.set(validated.choice, group);
         }
       }
     }
@@ -522,6 +559,7 @@ export class AiService {
 
   /**
    * Score focus relevance per tab with individual score questions.
+   * Each question explicitly references the target tab.
    */
   async scoreFocus(tabs: TabItem[], goal: string): Promise<FocusRelevance[]> {
     const cacheKey = this.getCacheKey(`focus:${goal}`, tabs);
@@ -542,7 +580,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`focus_${tab.id}`] = {
           type: 'score',
-          instructions: `Score how relevant this tab is to the user's focus goal: "${goal}". 0 = not relevant, 1 = highly relevant.`,
+          instructions: `Score how relevant the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") is to the user's focus goal: "${goal}". 0 = not relevant, 1 = highly relevant.`,
           criteria: [
             'not relevant',
             'slightly relevant',
@@ -560,27 +598,37 @@ export class AiService {
       });
 
       for (const tab of batch) {
-        const answer = response.answers[`focus_${tab.id}`] as
-          JevScoreAnswer | undefined;
-        const score = answer?.score ?? 0;
-        const normalized = answer?.normalized ?? 0;
+        const answer = response.answers[`focus_${tab.id}`];
+        const validated = validateScoreAnswer(answer);
 
-        const reason =
-          score >= 4
-            ? 'Critically relevant to focus goal'
-            : score >= 3
-              ? 'Highly relevant to focus goal'
-              : score >= 2
-                ? 'Moderately relevant'
-                : score >= 1
-                  ? 'Slightly relevant'
-                  : 'Not relevant';
+        if (validated) {
+          const score = validated.score;
+          const normalized = validated.normalized;
 
-        results.push({
-          tabId: tab.id,
-          score: normalized,
-          reason,
-        });
+          const reason =
+            score >= 4
+              ? 'Critically relevant to focus goal'
+              : score >= 3
+                ? 'Highly relevant to focus goal'
+                : score >= 2
+                  ? 'Moderately relevant'
+                  : score >= 1
+                    ? 'Slightly relevant'
+                    : 'Not relevant';
+
+          results.push({
+            tabId: tab.id,
+            score: normalized,
+            reason,
+          });
+        } else {
+          // Invalid or missing score - default to not relevant
+          results.push({
+            tabId: tab.id,
+            score: 0,
+            reason: 'Focus scoring failed or returned invalid score',
+          });
+        }
       }
     }
 
@@ -591,6 +639,7 @@ export class AiService {
   /**
    * Evaluate cleanup per tab with individual cleanup questions.
    * Local exact-duplicate detection runs first (deterministic).
+   * Each question explicitly references the target tab.
    */
   async suggestCleanup(tabs: TabItem[]): Promise<CleanupSuggestion[]> {
     // First check for exact URL duplicates locally (deterministic)
@@ -627,6 +676,9 @@ export class AiService {
     const state = tabs.map(this.sanitizeTab).join('\n');
     const results: CleanupSuggestion[] = [];
 
+    const cleanupChoices = ['keep', 'duplicate', 'stale', 'low-value'] as const;
+    const allowedChoices = [...cleanupChoices];
+
     for (
       let batchStart = 0;
       batchStart < tabs.length;
@@ -638,8 +690,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`cleanup_${tab.id}`] = {
           type: 'choice',
-          instructions:
-            'Should this tab be cleaned up? Choose the type of cleanup if applicable.',
+          instructions: `Should the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") be cleaned up? Choose the type of cleanup if applicable.`,
           criteria: {
             keep: 'Tab is useful and should be kept',
             duplicate: 'Tab is a semantic duplicate of another tab',
@@ -656,15 +707,14 @@ export class AiService {
       });
 
       for (const tab of batch) {
-        const answer = response.answers[`cleanup_${tab.id}`] as
-          JevChoiceAnswer | undefined;
-        const choice = answer?.choice;
+        const answer = response.answers[`cleanup_${tab.id}`];
+        const validated = validateChoiceAnswer(answer, allowedChoices);
 
-        if (choice && choice !== 'keep') {
+        if (validated && validated.choice !== 'keep') {
           results.push({
-            type: choice as CleanupSuggestion['type'],
+            type: validated.choice as CleanupSuggestion['type'],
             tabIds: [tab.id],
-            description: `Jev suggested ${choice}`,
+            description: `Jev suggested ${validated.choice}`,
           });
         }
       }

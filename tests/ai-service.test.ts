@@ -48,39 +48,42 @@ function createMockTabs(): TabItem[] {
   ];
 }
 
+function makeChoiceAnswer(choice: string, prob: number) {
+  return { type: 'choice', choice, probabilities: { [choice]: prob } };
+}
+
+function makeScoreAnswer(score: number, normalized: number, prob: number) {
+  return { type: 'score', score, normalized, probabilities: { [score]: prob } };
+}
+
 describe('AiService - per-tab classification', () => {
   afterEach(() => vi.unstubAllGlobals());
 
   it('classifies each tab independently with different categories', async () => {
     const tabs = createMockTabs();
 
-    // We need to mock fetch to return different responses based on the request
     const fetchMock = vi
       .fn()
       .mockImplementation(async (url: string, options: RequestInit) => {
         const body = JSON.parse(options.body as string);
         const questions = body.questions;
 
-        const answers: Record<
-          string,
-          { choice: string; probabilities: Record<string, number> }
-        > = {};
+        // Verify instructions include tab ID and title
+        expect(questions['classify_1']?.instructions).toContain('ID 1');
+        expect(questions['classify_1']?.instructions).toContain('GitHub');
+        expect(questions['classify_2']?.instructions).toContain('ID 2');
+        expect(questions['classify_2']?.instructions).toContain('YouTube');
+        expect(questions['classify_3']?.instructions).toContain('ID 3');
+        expect(questions['classify_3']?.instructions).toContain('Gmail');
+
+        const answers: Record<string, ReturnType<typeof makeChoiceAnswer>> = {};
 
         if (questions['classify_1'])
-          answers['classify_1'] = {
-            choice: 'Development',
-            probabilities: { Development: 0.95 },
-          };
+          answers['classify_1'] = makeChoiceAnswer('Development', 0.95);
         if (questions['classify_2'])
-          answers['classify_2'] = {
-            choice: 'Entertainment',
-            probabilities: { Entertainment: 0.95 },
-          };
+          answers['classify_2'] = makeChoiceAnswer('Entertainment', 0.95);
         if (questions['classify_3'])
-          answers['classify_3'] = {
-            choice: 'Communication',
-            probabilities: { Communication: 0.95 },
-          };
+          answers['classify_3'] = makeChoiceAnswer('Communication', 0.95);
 
         return {
           ok: true,
@@ -91,7 +94,6 @@ describe('AiService - per-tab classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
     service.setGatewayKey('test-key');
 
     const results: TabClassification[] = await service.classifyTabs(tabs);
@@ -105,13 +107,12 @@ describe('AiService - per-tab classification', () => {
     expect(youtube?.category).toBe('Entertainment');
     expect(gmail?.category).toBe('Communication');
 
-    // Confidence should be high
     expect(github?.confidence).toBeGreaterThan(0.9);
     expect(youtube?.confidence).toBeGreaterThan(0.9);
     expect(gmail?.confidence).toBeGreaterThan(0.9);
   });
 
-  it('falls back to default category for unknown classifications', async () => {
+  it('falls back to Other category for unknown classifications', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => ({
       ok: true,
       json: async () => ({ model: 'typesafe-ai/jev', answers: {} }),
@@ -120,15 +121,15 @@ describe('AiService - per-tab classification', () => {
 
     const service = new AiService();
     service.setGatewayKey('test-key');
-    service.setGatewayKey('test-key');
     const tabs = createMockTabs();
 
     const results = await service.classifyTabs(tabs);
 
-    // All should fall back to first category
+    // All should fall back to Other with 0 confidence
     for (const result of results) {
-      expect(result.category).toBe('Development');
+      expect(result.category).toBe('Other');
       expect(result.confidence).toBe(0);
+      expect(result.reasoning).toContain('failed');
     }
   });
 
@@ -138,14 +139,8 @@ describe('AiService - per-tab classification', () => {
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          classify_1: {
-            choice: 'Entertainment',
-            probabilities: { Entertainment: 0.9 },
-          },
-          classify_2: {
-            choice: 'Development',
-            probabilities: { Development: 0.9 },
-          },
+          classify_1: makeChoiceAnswer('Entertainment', 0.9),
+          classify_2: makeChoiceAnswer('Development', 0.9),
         },
       }),
     }));
@@ -173,6 +168,29 @@ describe('AiService - per-tab classification', () => {
     // Tab 1 should keep user's classification
     const tab1 = results.find((r) => r.tabId === 1);
     expect(tab1?.category).toBe('Development');
+  });
+
+  it('includes custom categories and overrides in cache key', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ model: 'typesafe-ai/jev', answers: {} }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    // First call with default categories
+    await service.classifyTabs(tabs);
+
+    // Second call with custom categories - should not use cache
+    const customCategories: TabCategory[] = ['Development', 'Research'];
+    const results2 = await service.classifyTabs(tabs, customCategories);
+
+    expect(results2).toHaveLength(1);
+    // Should fall back to Other since no valid answer
+    expect(results2[0]!.category).toBe('Other');
   });
 });
 
@@ -210,26 +228,23 @@ describe('AiService - per-tab workspace routing', () => {
         const body = JSON.parse(options.body as string);
         const questions = body.questions;
 
-        const answers: Record<
-          string,
-          { choice: string; probabilities: Record<string, number> }
-        > = {};
+        // Verify instructions include tab ID and title
+        expect(questions['route_1']?.instructions).toContain('ID 1');
+        expect(questions['route_1']?.instructions).toContain('GitHub');
+        expect(questions['route_2']?.instructions).toContain('ID 2');
+        expect(questions['route_2']?.instructions).toContain('YouTube');
+        expect(questions['route_3']?.instructions).toContain('ID 3');
+        expect(questions['route_3']?.instructions).toContain('Gmail');
 
+        const answers: Record<string, ReturnType<typeof makeChoiceAnswer>> = {};
+
+        // Choices must match the format "workspaceId:workspaceName"
         if (questions['route_1'])
-          answers['route_1'] = {
-            choice: 'ws-1:Development',
-            probabilities: { 'ws-1': 0.9 },
-          };
+          answers['route_1'] = makeChoiceAnswer('ws-1:Development', 0.9);
         if (questions['route_2'])
-          answers['route_2'] = {
-            choice: 'ws-2:Entertainment',
-            probabilities: { 'ws-2': 0.9 },
-          };
+          answers['route_2'] = makeChoiceAnswer('ws-2:Entertainment', 0.9);
         if (questions['route_3'])
-          answers['route_3'] = {
-            choice: 'ws-3:Communication',
-            probabilities: { 'ws-3': 0.9 },
-          };
+          answers['route_3'] = makeChoiceAnswer('ws-3:Communication', 0.9);
 
         return {
           ok: true,
@@ -274,10 +289,7 @@ describe('AiService - per-tab workspace routing', () => {
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          route_1: {
-            choice: 'ws-99:NonExistent',
-            probabilities: { 'ws-99': 0.9 },
-          },
+          route_1: makeChoiceAnswer('ws-99:NonExistent', 0.9),
         },
       }),
     }));
@@ -295,6 +307,44 @@ describe('AiService - per-tab workspace routing', () => {
     // Should skip invalid workspace
     expect(results).toHaveLength(0);
   });
+
+  it('includes workspace definitions in cache key', async () => {
+    const workspaces = [
+      {
+        id: 'ws-1',
+        name: 'Development',
+        color: '#ff0000',
+        createdAt: '',
+        icon: 'D',
+      },
+    ];
+
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          route_1: makeChoiceAnswer('ws-1:Development', 0.9),
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    // First call
+    const results1 = await service.routeTabs(tabs, workspaces);
+    expect(results1).toHaveLength(1);
+
+    // Clear cache manually (simulating workspace change)
+    service.clearCache();
+
+    // Second call should work without cache
+    const results2 = await service.routeTabs(tabs, workspaces);
+    expect(results2).toHaveLength(1);
+  });
 });
 
 describe('AiService - per-tab focus relevance', () => {
@@ -307,33 +357,25 @@ describe('AiService - per-tab focus relevance', () => {
         const body = JSON.parse(options.body as string);
         const questions = body.questions;
 
-        const answers: Record<
-          string,
-          {
-            score: number;
-            normalized: number;
-            probabilities: Record<string, number>;
-          }
-        > = {};
+        // Verify instructions include tab ID and title
+        expect(questions['focus_1']?.instructions).toContain('ID 1');
+        expect(questions['focus_1']?.instructions).toContain('GitHub');
+        expect(questions['focus_2']?.instructions).toContain('ID 2');
+        expect(questions['focus_2']?.instructions).toContain('YouTube');
+        expect(questions['focus_3']?.instructions).toContain('ID 3');
+        expect(questions['focus_3']?.instructions).toContain('Gmail');
+        expect(questions['focus_1']?.instructions).toContain(
+          'C++ Limit Order Book',
+        );
+
+        const answers: Record<string, ReturnType<typeof makeScoreAnswer>> = {};
 
         if (questions['focus_1'])
-          answers['focus_1'] = {
-            score: 5,
-            normalized: 1.0,
-            probabilities: { '5': 0.9 },
-          };
+          answers['focus_1'] = makeScoreAnswer(5, 1.0, 0.9);
         if (questions['focus_2'])
-          answers['focus_2'] = {
-            score: 2,
-            normalized: 0.4,
-            probabilities: { '2': 0.7 },
-          };
+          answers['focus_2'] = makeScoreAnswer(2, 0.4, 0.7);
         if (questions['focus_3'])
-          answers['focus_3'] = {
-            score: 1,
-            normalized: 0.2,
-            probabilities: { '1': 0.8 },
-          };
+          answers['focus_3'] = makeScoreAnswer(1, 0.2, 0.8);
 
         return {
           ok: true,
@@ -370,13 +412,44 @@ describe('AiService - per-tab focus relevance', () => {
     expect(gmail?.reason).toBe('Slightly relevant');
   });
 
-  it('persists focus preferences per workspace', async () => {
+  it('handles invalid score answers gracefully', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => ({
       ok: true,
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          focus_1: { score: 3, normalized: 0.6, probabilities: { '3': 0.8 } },
+          focus_1: {
+            type: 'score',
+            score: 10,
+            normalized: 2.0,
+            probabilities: { '10': 0.9 },
+          }, // invalid score > 5
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    const results: FocusRelevance[] = await service.scoreFocus(
+      tabs,
+      'test goal',
+    );
+
+    expect(results).toHaveLength(1);
+    expect(results[0]!.score).toBe(0);
+    expect(results[0]!.reason).toContain('failed');
+  });
+
+  it('persists focus preferences per workspace via cache', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          focus_1: makeScoreAnswer(3, 0.6, 0.8),
         },
       }),
     }));
@@ -438,26 +511,19 @@ describe('AiService - semantic grouping', () => {
         const body = JSON.parse(options.body as string);
         const questions = body.questions;
 
-        const answers: Record<
-          string,
-          { choice: string; probabilities: Record<string, number> }
-        > = {};
+        // Verify instructions include tab ID and title
+        expect(questions['topic_1']?.instructions).toContain('ID 1');
+        expect(questions['topic_2']?.instructions).toContain('ID 2');
+        expect(questions['topic_3']?.instructions).toContain('ID 3');
+
+        const answers: Record<string, ReturnType<typeof makeChoiceAnswer>> = {};
 
         if (questions['topic_1'])
-          answers['topic_1'] = {
-            choice: 'TypeScript development',
-            probabilities: { 'TypeScript development': 0.9 },
-          };
+          answers['topic_1'] = makeChoiceAnswer('TypeScript development', 0.9);
         if (questions['topic_2'])
-          answers['topic_2'] = {
-            choice: 'TypeScript development',
-            probabilities: { 'TypeScript development': 0.9 },
-          };
+          answers['topic_2'] = makeChoiceAnswer('TypeScript development', 0.9);
         if (questions['topic_3'])
-          answers['topic_3'] = {
-            choice: 'Entertainment',
-            probabilities: { Entertainment: 0.9 },
-          };
+          answers['topic_3'] = makeChoiceAnswer('Entertainment', 0.9);
 
         return {
           ok: true,
@@ -478,6 +544,30 @@ describe('AiService - semantic grouping', () => {
     expect(group.tabs).not.toContain(3);
   });
 
+  it('excludes none and Other from generated groups', async () => {
+    const tabs = createMockTabs();
+
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          topic_1: makeChoiceAnswer('none', 0.9),
+          topic_2: makeChoiceAnswer('Other', 0.9),
+          topic_3: makeChoiceAnswer('Development', 0.9),
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const results: RelatedTabGroup[] = await service.groupTabs(tabs);
+
+    // No groups with 2+ tabs sharing the same topic (and none/Other excluded)
+    expect(results).toHaveLength(0);
+  });
+
   it('returns empty groups for single-topic tabs', async () => {
     const tabs = createMockTabs();
 
@@ -486,18 +576,9 @@ describe('AiService - semantic grouping', () => {
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          topic_1: {
-            choice: 'Development',
-            probabilities: { Development: 0.9 },
-          },
-          topic_2: {
-            choice: 'Entertainment',
-            probabilities: { Entertainment: 0.9 },
-          },
-          topic_3: {
-            choice: 'Communication',
-            probabilities: { Communication: 0.9 },
-          },
+          topic_1: makeChoiceAnswer('TypeScript development', 0.9),
+          topic_2: makeChoiceAnswer('Entertainment', 0.9),
+          topic_3: makeChoiceAnswer('Communication', 0.9),
         },
       }),
     }));
@@ -558,9 +639,9 @@ describe('AiService - safe cleanup', () => {
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          cleanup_1: { choice: 'keep', probabilities: { keep: 0.9 } },
-          cleanup_2: { choice: 'keep', probabilities: { keep: 0.9 } },
-          cleanup_3: { choice: 'keep', probabilities: { keep: 0.9 } },
+          cleanup_1: makeChoiceAnswer('keep', 0.9),
+          cleanup_2: makeChoiceAnswer('keep', 0.9),
+          cleanup_3: makeChoiceAnswer('keep', 0.9),
         },
       }),
     }));
@@ -621,9 +702,9 @@ describe('AiService - safe cleanup', () => {
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          cleanup_1: { choice: 'stale', probabilities: { stale: 0.9 } },
-          cleanup_2: { choice: 'keep', probabilities: { keep: 0.9 } },
-          cleanup_3: { choice: 'keep', probabilities: { keep: 0.9 } },
+          cleanup_1: makeChoiceAnswer('stale', 0.9),
+          cleanup_2: makeChoiceAnswer('keep', 0.9),
+          cleanup_3: makeChoiceAnswer('keep', 0.9),
         },
       }),
     }));
@@ -639,6 +720,28 @@ describe('AiService - safe cleanup', () => {
     expect(stale.type).toBe('stale');
     expect(stale.tabIds).toEqual([1]);
     expect(stale.description).toContain('stale');
+  });
+
+  it('validates cleanup answer choices', async () => {
+    const tabs = createMockTabs().slice(0, 1);
+
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          cleanup_1: makeChoiceAnswer('invalid-choice', 0.9),
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const results: CleanupSuggestion[] = await service.suggestCleanup(tabs);
+
+    // Invalid choice should be ignored
+    expect(results).toHaveLength(0);
   });
 });
 
@@ -661,10 +764,7 @@ describe('AiService - cache invalidation', () => {
       json: async () => ({
         model: 'typesafe-ai/jev',
         answers: {
-          route_1: {
-            choice: 'ws-1:Development',
-            probabilities: { 'ws-1': 0.9 },
-          },
+          route_1: makeChoiceAnswer('ws-1:Development', 0.9),
         },
       }),
     }));
@@ -684,6 +784,57 @@ describe('AiService - cache invalidation', () => {
     // Second call should work without cache
     const results2 = await service.routeTabs(tabs, workspaces);
     expect(results2).toHaveLength(1);
+  });
+
+  it('invalidates classification cache when categories change', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ model: 'typesafe-ai/jev', answers: {} }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    // First call with default categories
+    await service.classifyTabs(tabs);
+
+    // Second call with custom categories - should not use cache
+    const customCategories: TabCategory[] = ['Development', 'Research'];
+    await service.classifyTabs(tabs, customCategories);
+
+    // Both calls should have been made (fetchMock called twice)
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+  });
+
+  it('invalidates classification cache when overrides change', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({ model: 'typesafe-ai/jev', answers: {} }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    // First call without overrides
+    await service.classifyTabs(tabs);
+
+    // Second call with overrides - should not use cache
+    const overrides = {
+      1: {
+        tabId: 1,
+        category: 'Development' as TabCategory,
+        confidence: 1,
+        reasoning: 'User override',
+      },
+    };
+    await service.classifyTabs(tabs, undefined, overrides);
+
+    // Both calls should have been made
+    expect(fetchMock).toHaveBeenCalledTimes(2);
   });
 });
 
@@ -719,11 +870,12 @@ describe('AiService - contract validation', () => {
 
     const results: TabClassification[] = await service.classifyTabs(tabs);
 
-    // Should fall back to default category
+    // Should fall back to Other category with 0 confidence
     expect(results).toHaveLength(1);
     const cls = results[0]!;
-    expect(cls.category).toBe('Development');
+    expect(cls.category).toBe('Other');
     expect(cls.confidence).toBe(0);
+    expect(cls.reasoning).toContain('failed');
   });
 
   it('handles rate limits and timeouts', async () => {
@@ -735,6 +887,74 @@ describe('AiService - contract validation', () => {
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow('Rate limited');
+  });
+
+  it('validates choice answer type and probabilities', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          classify_1: { type: 'score', score: 5 }, // wrong type
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    const results = await service.classifyTabs(tabs);
+    expect(results[0]!.category).toBe('Other');
+    expect(results[0]!.confidence).toBe(0);
+  });
+
+  it('validates choice answer probabilities range', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          classify_1: makeChoiceAnswer('Development', 1.5), // invalid probability > 1
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    const results = await service.classifyTabs(tabs);
+    expect(results[0]!.category).toBe('Other');
+    expect(results[0]!.confidence).toBe(0);
+  });
+
+  it('validates score answer range', async () => {
+    const fetchMock = vi.fn().mockImplementation(async () => ({
+      ok: true,
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          focus_1: {
+            type: 'score',
+            score: -1,
+            normalized: -0.2,
+            probabilities: { '-1': 0.9 },
+          }, // invalid negative score
+        },
+      }),
+    }));
+    vi.stubGlobal('fetch', fetchMock);
+
+    const service = new AiService();
+    service.setGatewayKey('test-key');
+    const tabs = createMockTabs().slice(0, 1);
+
+    const results = await service.scoreFocus(tabs, 'test');
+    expect(results[0]!.score).toBe(0);
+    expect(results[0]!.reason).toContain('failed');
   });
 });
 
@@ -832,6 +1052,7 @@ describe('AiService - input sanitization and security', () => {
 
     expect(results).toHaveLength(1);
     const cls = results[0]!;
-    expect(cls.category).toBe('Development'); // fallback
+    expect(cls.category).toBe('Other'); // fallback
+    expect(cls.confidence).toBe(0);
   });
 });
