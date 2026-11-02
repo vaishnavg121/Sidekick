@@ -114,7 +114,7 @@ export type Request = {
 export type Reply =
   { ok: true; bookmarks?: BookmarkItem[] } | { ok: false; error: string };
 export type ServerEvent =
-  | { type: 'focus'; address: boolean }
+  | { type: 'focus'; address: boolean; openCommandPalette?: boolean }
   | {
       type: 'snapshot';
       tabs: TabItem[];

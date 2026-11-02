@@ -88,31 +88,20 @@ export function CommandPalette({
   const activeTab = tabs.find((t) => t.active);
   const hasActiveTab = !!activeTab;
   const activeWorkspaceId = metadata?.activeWorkspaceId ?? '';
-  const workspaces = metadata?.workspaces ?? [];
-  const favorites = metadata?.favorites ?? [];
-  const pinned = metadata?.pinnedEntries ?? [];
 
   // Build search index (memoized to prevent unnecessary recalculations)
   const searchIndex = useMemo(
     () =>
       buildSearchIndex(
         tabs,
-        workspaces,
-        favorites,
-        pinned,
+        metadata?.workspaces ?? [],
+        metadata?.favorites ?? [],
+        metadata?.pinnedEntries ?? [],
         bookmarks,
         activeWorkspaceId,
         activeTab?.id,
       ),
-    [
-      tabs,
-      workspaces,
-      favorites,
-      pinned,
-      bookmarks,
-      activeWorkspaceId,
-      activeTab?.id,
-    ],
+    [tabs, metadata, bookmarks, activeWorkspaceId, activeTab?.id],
   );
 
   // Compute results directly during render using useMemo (derived state)

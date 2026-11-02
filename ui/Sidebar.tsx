@@ -164,6 +164,28 @@ export function Sidebar({
       client.dispose();
     };
   }, [client, hover, nativePanel, embedded]);
+
+  const openCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(true);
+    // Fetch bookmarks for the palette
+    client
+      .request({ type: 'bookmarks.read', query: '' } as Command)
+      .then((reply) => {
+        if (reply.ok && reply.bookmarks) {
+          setPaletteBookmarks(reply.bookmarks);
+        }
+      })
+      .catch(() => {
+        // Ignore bookmark fetch errors
+      });
+    void client.command({ type: 'command-palette.open' });
+  }, [client]);
+
+  const closeCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(false);
+    void client.command({ type: 'command-palette.close' });
+  }, [client]);
+
   useEffect(() => {
     const reveal = () => {
       if (
@@ -178,13 +200,18 @@ export function Sidebar({
       setForcedReveal(true);
       setOpen(true);
     };
+    const openPalette = () => {
+      openCommandPalette();
+    };
     pageControls.addEventListener('address', reveal);
     pageControls.addEventListener('reveal', reveal);
+    pageControls.addEventListener('open-command-palette', openPalette);
     return () => {
       pageControls.removeEventListener('address', reveal);
       pageControls.removeEventListener('reveal', reveal);
+      pageControls.removeEventListener('open-command-palette', openPalette);
     };
-  }, [hover, embedded, client]);
+  }, [hover, embedded, client, openCommandPalette]);
 
   type ActivateTabPayload = { tabId: number };
   type SwitchWorkspacePayload = { workspaceId: string };
@@ -243,27 +270,6 @@ export function Sidebar({
       typeof (p as Record<string, unknown>).query === 'string'
     );
   }
-
-  const openCommandPalette = useCallback(() => {
-    setCommandPaletteOpen(true);
-    // Fetch bookmarks for the palette
-    client
-      .request({ type: 'bookmarks.read', query: '' } as Command)
-      .then((reply) => {
-        if (reply.ok && reply.bookmarks) {
-          setPaletteBookmarks(reply.bookmarks);
-        }
-      })
-      .catch(() => {
-        // Ignore bookmark fetch errors
-      });
-    void client.command({ type: 'command-palette.open' });
-  }, [client]);
-
-  const closeCommandPalette = useCallback(() => {
-    setCommandPaletteOpen(false);
-    void client.command({ type: 'command-palette.close' });
-  }, [client]);
 
   const handlePaletteAction = (action: CommandPaletteAction) => {
     const { type, payload } = action;

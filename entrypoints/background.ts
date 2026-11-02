@@ -684,6 +684,45 @@ export default defineBackground(() => {
       void immersive.exit(tab.windowId).catch(report);
       return;
     }
+    if (command === 'open-command-palette') {
+      // Send focus event to open command palette
+      const panelPorts = [...panelClients].filter(
+        ([, info]) => info.windowId === tab.windowId,
+      );
+      if (panelPorts.length) {
+        for (const [port] of panelPorts)
+          send(port, {
+            type: 'focus',
+            address: false,
+            openCommandPalette: true,
+          });
+        return;
+      }
+      const dashboard = [...clients.keys()].find(
+        (port) =>
+          port.sender?.tab?.id === tab.id &&
+          port.sender?.url === chrome.runtime.getURL('newtab.html'),
+      );
+      if (dashboard) {
+        send(dashboard, {
+          type: 'focus',
+          address: false,
+          openCommandPalette: true,
+        });
+        return;
+      }
+      // Restricted pages cannot receive content scripts. Open Chrome's panel in
+      // the command's gesture, before any awaits. It contains the same controls.
+      if (isRestrictedUrl(tab.url ?? '')) {
+        void panels.pin(tab.windowId).catch(report);
+        return;
+      }
+      if (tab.id !== undefined)
+        void chrome.tabs
+          .sendMessage(tab.id, { channel: 'sidekick:page', action: command })
+          .catch(report);
+      return;
+    }
     if (command !== 'focus-address' && command !== 'show-sidebar') return;
     const panelPorts = [...panelClients].filter(
       ([, info]) => info.windowId === tab.windowId,

@@ -33,6 +33,8 @@ export default defineContentScript({
       else if (message.action === 'focus-address') focusAddress();
       else if (message.action === 'show-sidebar')
         pageControls.dispatchEvent(new Event('reveal'));
+      else if (message.action === 'open-command-palette')
+        pageControls.dispatchEvent(new Event('open-command-palette'));
       else return;
       respond({ ok: true });
     };
