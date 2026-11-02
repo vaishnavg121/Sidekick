@@ -6,6 +6,7 @@ import type {
   TabClassification,
   CleanupSuggestion,
   WorkspaceRecommendation,
+  FocusRelevance,
 } from '../lib/models';
 
 function createMockTabs(): TabItem[] {
@@ -344,7 +345,7 @@ describe('AiService - per-tab focus relevance', () => {
     service.setGatewayKey('test-key');
     const tabs = createMockTabs();
 
-    const results = await service.scoreFocus(
+    const results: FocusRelevance[] = await service.scoreFocus(
       tabs,
       'C++ Limit Order Book project',
     );
