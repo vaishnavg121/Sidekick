@@ -15,6 +15,8 @@ import {
 import {
   saveResource,
   reorderResources,
+  reorderFolders,
+  moveFolder,
   type ResourceInput,
 } from './resources';
 
@@ -228,6 +230,20 @@ export class MetadataRepository {
     return this.update((m) =>
       reorderResources(m, kind, workspaceId, ids, folderId),
     );
+  }
+  reorderFolders(
+    workspaceId: string,
+    ids: string[],
+    parentId: string | null,
+  ): Promise<Metadata> {
+    return this.update((m) => reorderFolders(m, workspaceId, ids, parentId));
+  }
+  moveFolder(
+    id: string,
+    workspaceId: string,
+    parentId: string | null,
+  ): Promise<Metadata> {
+    return this.update((m) => moveFolder(m, id, workspaceId, parentId));
   }
   authorWorkspace(input: {
     id?: string;

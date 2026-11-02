@@ -504,23 +504,22 @@ export function Sidebar({
     event.preventDefault();
 
     if (item.kind === 'tab') {
-      // Reorder tabs
+      // Reorder tabs - use chrome.tabs.move for actual reordering
       if (targetTab && item.id !== String(targetTab.id)) {
         const tabIds = tabs.map((t) => String(t.id));
         const fromIndex = tabIds.indexOf(item.id);
         const toIndex = tabIds.indexOf(String(targetTab.id));
         if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
-          const newIds = [...tabIds];
-          const moved = tabIds[fromIndex];
-          if (moved === undefined) return;
-          newIds.splice(fromIndex, 1);
-          newIds.splice(toIndex, 0, moved);
-          // Note: Chrome tab reordering would need background script
-          // For now, we just reorder in Sidekick's view
-          run({
-            type: 'tab.activate',
-            tabId: Number(item.id),
-          });
+          const windowId = client.currentWindowId;
+          if (windowId) {
+            const moveIndex = toIndex > fromIndex ? toIndex : toIndex;
+            void client.command({
+              type: 'tab.move',
+              tabId: Number(item.id),
+              windowId,
+              index: moveIndex,
+            });
+          }
         }
       }
     } else if (item.kind === 'pinned') {

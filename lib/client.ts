@@ -13,6 +13,10 @@ export class SidebarClient {
   private retryDelay = 500;
   private windowId?: number;
   private queryDraft?: string;
+
+  get currentWindowId(): number | undefined {
+    return this.windowId;
+  }
   constructor(
     private receive: (event: ServerEvent) => void,
     private connection: (connected: boolean) => void,

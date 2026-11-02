@@ -37,6 +37,20 @@ export class ResourceService {
       case 'folder.remove':
         await this.repository.removeFolder(command.id);
         break;
+      case 'folder.reorder':
+        await this.repository.reorderFolders(
+          command.workspaceId,
+          command.ids,
+          command.parentId,
+        );
+        break;
+      case 'folder.move':
+        await this.repository.moveFolder(
+          command.id,
+          command.workspaceId,
+          command.parentId,
+        );
+        break;
       case 'resource.current': {
         const tab =
           command.tabId !== undefined

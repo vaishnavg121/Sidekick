@@ -110,3 +110,57 @@ export function reorderResources(
     ),
   };
 }
+
+export function reorderFolders(
+  metadata: Metadata,
+  workspaceId: string,
+  ids: string[],
+  parentId: string | null,
+): Metadata {
+  const folders = metadata.folders.filter(
+    (f) => f.workspaceId === workspaceId && f.parentId === parentId,
+  );
+  if (
+    new Set(ids).size !== ids.length ||
+    ids.length !== folders.length ||
+    folders.some((f) => !ids.includes(f.id))
+  )
+    throw new Error('The list changed. Try reordering again.');
+  const order = new Map(ids.map((id, index) => [id, index]));
+  return {
+    ...metadata,
+    folders: metadata.folders.map((f) =>
+      order.has(f.id) ? { ...f, order: order.get(f.id)! } : f,
+    ),
+  };
+}
+
+export function moveFolder(
+  metadata: Metadata,
+  id: string,
+  workspaceId: string,
+  parentId: string | null,
+): Metadata {
+  const folder = metadata.folders.find((f) => f.id === id);
+  if (!folder) throw new Error('Folder not found.');
+  if (folder.workspaceId !== workspaceId)
+    throw new Error('Folder not in workspace.');
+  if (parentId === id) throw new Error('Cannot move a folder into itself.');
+
+  let currentParentId = parentId;
+  while (currentParentId !== null) {
+    if (currentParentId === id) {
+      throw new Error('Cannot move a folder into its own descendant.');
+    }
+    const parent = metadata.folders.find((f) => f.id === currentParentId);
+    if (!parent) break;
+    currentParentId = parent.parentId;
+  }
+
+  return {
+    ...metadata,
+    folders: metadata.folders.map((f) =>
+      f.id === id ? { ...f, parentId } : f,
+    ),
+  };
+}

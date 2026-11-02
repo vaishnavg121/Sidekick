@@ -63,11 +63,24 @@ export type AuthorCommand =
         collapsed?: boolean;
       };
     }
+  | {
+      type: 'folder.reorder';
+      workspaceId: string;
+      ids: string[];
+      parentId: string | null;
+    }
+  | {
+      type: 'folder.move';
+      id: string;
+      workspaceId: string;
+      parentId: string | null;
+    }
   | { type: 'folder.remove'; id: string };
 export type Command =
   | AuthorCommand
   | { type: 'tab.activate' | 'tab.close'; tabId: number }
   | { type: 'tab.create' }
+  | { type: 'tab.move'; tabId: number; windowId: number; index: number }
   | { type: 'immersive.enter' | 'immersive.exit' }
   | { type: 'navigation.go'; input: string; newTab?: boolean }
   | {
@@ -231,6 +244,18 @@ export function isCommand(value: unknown): value is Command {
     case 'tab.close':
       return Number.isInteger(c.tabId) && Number(c.tabId) >= 0;
     case 'tab.create':
+    case 'tab.move':
+      return (
+        typeof c.tabId === 'number' &&
+        Number.isInteger(c.tabId) &&
+        c.tabId >= 0 &&
+        typeof c.windowId === 'number' &&
+        Number.isInteger(c.windowId) &&
+        c.windowId > 0 &&
+        typeof c.index === 'number' &&
+        Number.isInteger(c.index) &&
+        c.index >= 0
+      );
     case 'panel.pin':
     case 'immersive.enter':
     case 'immersive.exit':
@@ -260,6 +285,26 @@ export function isCommand(value: unknown): value is Command {
       );
     case 'favorite.remove':
       return typeof c.id === 'string' && c.id.length < 200;
+    case 'folder.reorder':
+      return (
+        typeof c.workspaceId === 'string' &&
+        c.workspaceId.length < 200 &&
+        Array.isArray(c.ids) &&
+        c.ids.every(
+          (id: unknown) => typeof id === 'string' && id.length < 200,
+        ) &&
+        (c.parentId === null ||
+          (typeof c.parentId === 'string' && c.parentId.length < 200))
+      );
+    case 'folder.move':
+      return (
+        typeof c.id === 'string' &&
+        c.id.length < 200 &&
+        typeof c.workspaceId === 'string' &&
+        c.workspaceId.length < 200 &&
+        (c.parentId === null ||
+          (typeof c.parentId === 'string' && c.parentId.length < 200))
+      );
     case 'sidebar.mode':
       return c.mode === 'hidden' || c.mode === 'hover' || c.mode === 'docked';
     case 'search.update':

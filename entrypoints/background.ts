@@ -306,6 +306,8 @@ export default defineBackground(() => {
             case 'workspace.save':
             case 'folder.save':
             case 'folder.remove':
+            case 'folder.reorder':
+            case 'folder.move':
               await resources.handle(c, windowId);
               break;
             case 'immersive.enter':
