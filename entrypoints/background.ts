@@ -622,6 +622,18 @@ export default defineBackground(() => {
               // Cleanup is handled client-side with confirmation
               break;
             }
+            case 'command-palette.open': {
+              // Command palette is handled client-side, but we can track it
+              break;
+            }
+            case 'command-palette.close': {
+              break;
+            }
+            case 'command-palette.action': {
+              // Actions are executed client-side via the sidebar client
+              // This case is for logging/analytics if needed
+              break;
+            }
           }
           respond({ ok: true });
           void refresh();

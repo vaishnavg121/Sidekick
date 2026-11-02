@@ -98,7 +98,14 @@ export type Command =
   | { type: 'ai.apply.routing'; recommendations: WorkspaceRecommendation[] }
   | { type: 'ai.apply.groups'; groups: RelatedTabGroup[] }
   | { type: 'ai.apply.focus'; relevance: FocusRelevance[] }
-  | { type: 'ai.apply.cleanup'; suggestions: CleanupSuggestion[] };
+  | { type: 'ai.apply.cleanup'; suggestions: CleanupSuggestion[] }
+  | { type: 'command-palette.open' }
+  | { type: 'command-palette.close' }
+  | {
+      type: 'command-palette.action';
+      action: string;
+      payload: Record<string, unknown>;
+    };
 export type Request = {
   channel: 'sidekick';
   windowId?: number;
@@ -391,6 +398,20 @@ export function isCommand(value: unknown): value is Command {
             typeof (sug as Record<string, unknown>).description === 'string',
         )
       );
+    case 'command-palette.open':
+    case 'command-palette.close':
+      return true;
+    case 'command-palette.action': {
+      const payload = c.payload as Record<string, unknown> | undefined;
+      return (
+        typeof c.action === 'string' &&
+        c.action.length > 0 &&
+        c.action.length <= 100 &&
+        payload !== undefined &&
+        typeof payload === 'object' &&
+        !Array.isArray(payload)
+      );
+    }
     default:
       return false;
   }

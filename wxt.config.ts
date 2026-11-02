@@ -23,6 +23,10 @@ export default defineConfig({
         suggested_key: { default: 'Alt+Shift+E' },
         description: 'Exit Sidekick immersive mode',
       },
+      'open-command-palette': {
+        suggested_key: { default: 'Alt+Shift+K' },
+        description: 'Open Sidekick command palette',
+      },
     },
     action: { default_title: 'Open Sidekick side panel' },
   },

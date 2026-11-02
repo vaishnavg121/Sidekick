@@ -1,4 +1,10 @@
-import { useEffect, useMemo, useState, type CSSProperties } from 'react';
+import {
+  useEffect,
+  useMemo,
+  useState,
+  useCallback,
+  type CSSProperties,
+} from 'react';
 import { SidebarClient } from '../lib/client';
 import { useSidebar } from '../lib/store';
 import { DEFAULT_PREFERENCES } from '../lib/models';
@@ -16,6 +22,9 @@ import { Pinned } from './Pinned';
 import { useTheme } from './theme';
 import { allowDrag, readDrag, startDrag } from './drag';
 import { AISuggestionsPanel } from './AISuggestionsPanel';
+import { CommandPalette } from './CommandPalette';
+import type { BookmarkItem } from '../lib/bookmarks';
+import type { CommandPaletteAction } from '../lib/command-palette';
 
 function TabRow({
   tab,
@@ -95,6 +104,8 @@ export function Sidebar({
   const [bookmarks, setBookmarks] = useState(false);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [forcedReveal, setForcedReveal] = useState(false);
+  const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [paletteBookmarks, setPaletteBookmarks] = useState<BookmarkItem[]>([]);
   const hover = useMemo(() => new HoverController(setOpen), []);
   const [client] = useState(
     () =>
@@ -174,6 +185,188 @@ export function Sidebar({
       pageControls.removeEventListener('reveal', reveal);
     };
   }, [hover, embedded, client]);
+
+  type ActivateTabPayload = { tabId: number };
+  type SwitchWorkspacePayload = { workspaceId: string };
+  type OpenUrlPayload = { url: string; newTab?: boolean };
+  type OpenFavoritePayload = { id: string };
+  type OpenPinnedPayload = { id: string };
+  type OpenBookmarkPayload = { url: string };
+  type SearchWebPayload = { query: string };
+
+  function isActivateTabPayload(p: unknown): p is ActivateTabPayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).tabId === 'number'
+    );
+  }
+  function isSwitchWorkspacePayload(p: unknown): p is SwitchWorkspacePayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).workspaceId === 'string'
+    );
+  }
+  function isOpenUrlPayload(p: unknown): p is OpenUrlPayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).url === 'string'
+    );
+  }
+  function isOpenFavoritePayload(p: unknown): p is OpenFavoritePayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).id === 'string'
+    );
+  }
+  function isOpenPinnedPayload(p: unknown): p is OpenPinnedPayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).id === 'string'
+    );
+  }
+  function isOpenBookmarkPayload(p: unknown): p is OpenBookmarkPayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).url === 'string'
+    );
+  }
+  function isSearchWebPayload(p: unknown): p is SearchWebPayload {
+    return (
+      typeof p === 'object' &&
+      p !== null &&
+      typeof (p as Record<string, unknown>).query === 'string'
+    );
+  }
+
+  const openCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(true);
+    // Fetch bookmarks for the palette
+    client
+      .request({ type: 'bookmarks.read', query: '' } as Command)
+      .then((reply) => {
+        if (reply.ok && reply.bookmarks) {
+          setPaletteBookmarks(reply.bookmarks);
+        }
+      })
+      .catch(() => {
+        // Ignore bookmark fetch errors
+      });
+    void client.command({ type: 'command-palette.open' });
+  }, [client]);
+
+  const closeCommandPalette = useCallback(() => {
+    setCommandPaletteOpen(false);
+    void client.command({ type: 'command-palette.close' });
+  }, [client]);
+
+  const handlePaletteAction = (action: CommandPaletteAction) => {
+    const { type, payload } = action;
+    switch (type) {
+      case 'activate-tab':
+        if (isActivateTabPayload(payload))
+          run({ type: 'tab.activate', tabId: payload.tabId });
+        break;
+      case 'switch-workspace':
+        if (isSwitchWorkspacePayload(payload))
+          run({ type: 'workspace.select', id: payload.workspaceId });
+        break;
+      case 'open-url':
+        if (isOpenUrlPayload(payload))
+          run({
+            type: 'navigation.go',
+            input: payload.url,
+            newTab: payload.newTab,
+          });
+        break;
+      case 'open-favorite':
+        if (isOpenFavoritePayload(payload))
+          run({ type: 'resource.open', kind: 'favorite', id: payload.id });
+        break;
+      case 'open-pinned':
+        if (isOpenPinnedPayload(payload))
+          run({ type: 'resource.open', kind: 'pinned', id: payload.id });
+        break;
+      case 'open-bookmark':
+        if (isOpenBookmarkPayload(payload))
+          run({ type: 'navigation.go', input: payload.url });
+        break;
+      case 'new-tab':
+        run({ type: 'tab.create' });
+        break;
+      case 'close-tab':
+        run({
+          type: 'tab.close',
+          tabId: state.tabs.find((t) => t.active)?.id ?? -1,
+        });
+        break;
+      case 'reload':
+        run({ type: 'navigation.action', action: 'reload' });
+        break;
+      case 'toggle-sidebar':
+        run({
+          type: 'sidebar.mode',
+          mode: effectiveMode === 'hover' ? 'hidden' : 'hover',
+        });
+        break;
+      case 'toggle-immersive':
+        run({
+          type: state.windowState.immersive
+            ? 'immersive.exit'
+            : 'immersive.enter',
+        });
+        break;
+      case 'pin-tab':
+        run({
+          type: 'resource.current',
+          kind: 'pinned',
+          tabId: state.tabs.find((t) => t.active)?.id,
+        });
+        break;
+      case 'open-settings':
+        state.setSettings(true);
+        break;
+      case 'open-bookmarks':
+        setBookmarks(true);
+        setShowAIPanel(false);
+        state.setSettings(false);
+        break;
+      case 'organize-with-jev':
+        run({ type: 'ai.classify', tabIds: state.tabs.map((t) => t.id) });
+        break;
+      case 'search-web':
+        if (isSearchWebPayload(payload))
+          run({ type: 'navigation.go', input: payload.query });
+        break;
+      default:
+        break;
+    }
+    closeCommandPalette();
+  };
+
+  // Command palette keyboard shortcut handler
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Alt+Shift+K for command palette
+      if (e.altKey && e.shiftKey && e.key === 'K') {
+        e.preventDefault();
+        openCommandPalette();
+      }
+      // Escape closes command palette
+      if (e.key === 'Escape' && commandPaletteOpen) {
+        e.preventDefault();
+        closeCommandPalette();
+      }
+    };
+    document.addEventListener('keydown', handleKeyDown);
+    return () => document.removeEventListener('keydown', handleKeyDown);
+  }, [commandPaletteOpen, client, openCommandPalette, closeCommandPalette]);
+
   const preferences = state.metadata?.preferences ?? DEFAULT_PREFERENCES;
   const effectiveMode =
     preferences.mode === 'docked' && !state.dockStatus.active && !embedded
@@ -462,6 +655,17 @@ export function Sidebar({
                 <Icon name="sparkles" size={14} />
               </button>
             )}
+            {!nativePanel && !embedded && (
+              <button
+                className="icon-button"
+                aria-label="Open command palette (Alt+Shift+K)"
+                title="Command Palette"
+                onClick={openCommandPalette}
+                disabled={!state.connected}
+              >
+                <Icon name="search" size={14} />
+              </button>
+            )}
           </div>
         </header>
         <WorkspaceSelector run={run} client={client} />
@@ -689,6 +893,15 @@ export function Sidebar({
             </button>
           )}
         </footer>
+        <CommandPalette
+          isOpen={commandPaletteOpen}
+          onClose={closeCommandPalette}
+          onAction={handlePaletteAction}
+          metadata={state.metadata}
+          tabs={state.tabs}
+          bookmarks={paletteBookmarks}
+          isImmersive={state.windowState.immersive}
+        />
       </aside>
     </div>
   );

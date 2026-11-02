@@ -4,6 +4,7 @@
 @source './Icon.tsx';
 @source './Pinned.tsx';
 @source './Favorites.tsx';
+@source './CommandPalette.tsx';
 
 .navigation {
   margin: 0 16px 12px;
@@ -1765,4 +1766,238 @@ body,
 }
 .ai-undo-toast button {
   flex-shrink: 0;
+}
+
+/* Command Palette */
+.command-palette-overlay {
+  position: fixed;
+  inset: 0;
+  background: #0006;
+  display: flex;
+  align-items: flex-start;
+  justify-content: center;
+  padding-top: 15vh;
+  z-index: 1000;
+  animation: fadeIn 120ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes fadeIn {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+.command-palette {
+  width: min(720px, 92vw);
+  background: var(--sk-bg);
+  border: 1px solid var(--sk-border);
+  border-radius: 14px;
+  box-shadow:
+    0 24px 60px #0008,
+    0 0 0 1px var(--sk-border);
+  overflow: hidden;
+  animation: slideDown 150ms cubic-bezier(0.2, 0.8, 0.2, 1);
+}
+
+@keyframes slideDown {
+  from {
+    opacity: 0;
+    transform: translateY(-12px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.command-palette-input-wrapper {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 14px 16px;
+  border-bottom: 1px solid var(--sk-border);
+  background: var(--sk-surface);
+}
+
+.command-palette-input-wrapper > Icon {
+  color: var(--sk-muted);
+  flex-shrink: 0;
+}
+
+.command-palette-input-wrapper input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--sk-text);
+  font-size: 15px;
+  font-weight: 400;
+  line-height: 1.4;
+}
+
+.command-palette-input-wrapper input::placeholder {
+  color: var(--sk-muted);
+}
+
+.command-palette-hint {
+  font-size: 10px;
+  color: var(--sk-muted);
+  background: var(--sk-hover);
+  border: 1px solid var(--sk-border);
+  border-radius: 4px;
+  padding: 2px 8px;
+  flex-shrink: 0;
+  font-family: inherit;
+}
+
+.command-palette-empty {
+  padding: 32px 16px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  text-align: center;
+  color: var(--sk-muted);
+}
+
+.command-palette-empty > Icon {
+  color: var(--sk-muted);
+  opacity: 0.6;
+}
+
+.command-palette-empty p {
+  font-size: 13px;
+  color: var(--sk-text);
+  margin: 0;
+}
+
+.command-palette-empty strong {
+  color: var(--sk-accent);
+}
+
+.command-palette-empty span {
+  font-size: 11px;
+}
+
+.command-palette-group {
+  border-bottom: 1px solid var(--sk-border);
+}
+
+.command-palette-group:last-child {
+  border-bottom: none;
+}
+
+.command-palette-group-label {
+  padding: 8px 14px;
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sk-muted);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  background: var(--sk-surface);
+}
+
+.command-palette-list {
+  list-style: none;
+  padding: 4px 0;
+  margin: 0;
+  max-height: 50vh;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.command-palette-item {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 8px 14px;
+  min-height: 44px;
+  cursor: pointer;
+  transition: background 80ms;
+}
+
+.command-palette-item:hover,
+.command-palette-item.selected {
+  background: var(--sk-hover);
+}
+
+.command-palette-item:focus-visible {
+  outline: 2px solid var(--sk-accent);
+  outline-offset: -2px;
+}
+
+.command-palette-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  flex-shrink: 0;
+  color: var(--sk-muted);
+}
+
+.command-palette-icon img {
+  border-radius: 4px;
+  background: var(--sk-bg);
+}
+
+.command-palette-content {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.command-palette-title {
+  font-size: 13px;
+  color: var(--sk-text);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-palette-description {
+  font-size: 11px;
+  color: var(--sk-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-palette-badge {
+  font-size: 9px;
+  font-weight: 500;
+  color: var(--sk-muted);
+  background: var(--sk-surface);
+  border: 1px solid var(--sk-border);
+  border-radius: 3px;
+  padding: 1px 6px;
+  flex-shrink: 0;
+  letter-spacing: 0.4px;
+  text-transform: uppercase;
+}
+
+.command-palette-item.selected .command-palette-badge {
+  color: var(--sk-accent);
+  border-color: var(--sk-accent);
+}
+
+/* Responsive adjustments */
+@media (max-width: 480px) {
+  .command-palette {
+    width: 96vw;
+    border-radius: 0;
+    height: 100vh;
+    max-height: 100vh;
+  }
+  .command-palette-overlay {
+    padding-top: 0;
+    align-items: stretch;
+  }
 }
