@@ -5,6 +5,7 @@ import type {
   TabCategory,
   TabClassification,
   CleanupSuggestion,
+  WorkspaceRecommendation,
 } from '../lib/models';
 
 function createMockTabs(): TabItem[] {
@@ -240,7 +241,10 @@ describe('AiService - per-tab workspace routing', () => {
     service.setGatewayKey('test-key');
     const tabs = createMockTabs();
 
-    const results: WorkspaceRecommendation[] = await service.routeTabs(tabs, workspaces);
+    const results: WorkspaceRecommendation[] = await service.routeTabs(
+      tabs,
+      workspaces,
+    );
 
     expect(results).toHaveLength(3);
     const github = results.find((r) => r.tabId === 1);
@@ -281,7 +285,10 @@ describe('AiService - per-tab workspace routing', () => {
     service.setGatewayKey('test-key');
     const tabs = createMockTabs();
 
-    const results = await service.routeTabs(tabs, workspaces);
+    const results: WorkspaceRecommendation[] = await service.routeTabs(
+      tabs,
+      workspaces,
+    );
 
     // Should skip invalid workspace
     expect(results).toHaveLength(0);
