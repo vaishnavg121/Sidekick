@@ -631,7 +631,7 @@ describe('AiService - safe cleanup', () => {
 
     const service = new AiService();
     service.setGatewayKey('test-key');
-    const results = await service.suggestCleanup(tabs);
+    const results: CleanupSuggestion[] = await service.suggestCleanup(tabs);
 
     // Only stale tab should be suggested for cleanup
     expect(results).toHaveLength(1);
