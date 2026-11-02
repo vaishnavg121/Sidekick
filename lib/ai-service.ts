@@ -138,6 +138,8 @@ const TOPIC_CHOICES = [
   'Other',
 ] as const;
 
+const MAX_BATCH_SIZE = 20; // Maximum tabs per Jev request to avoid oversized requests
+
 export class AiService {
   private gatewayKey: string | undefined;
   private cache = new Map<string, { result: unknown; timestamp: number }>();
@@ -256,9 +258,24 @@ export class AiService {
   private sanitizeTab(tab: TabItem): string {
     try {
       const url = new URL(tab.url);
-      return `${tab.title.slice(0, 100)} | ${url.hostname}`;
+      // Escape HTML entities in title to prevent XSS in state
+      const safeTitle = tab.title
+        .slice(0, 100)
+        .replace(/&/g, '&')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+      return `${tab.id}:${safeTitle} | ${url.hostname}`;
     } catch {
-      return `${tab.title.slice(0, 100)} | unknown`;
+      const safeTitle = tab.title
+        .slice(0, 100)
+        .replace(/&/g, '&')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+      return `${tab.id}:${safeTitle} | unknown`;
     }
   }
 
@@ -266,6 +283,10 @@ export class AiService {
     return tabs.map(this.sanitizeTab).join('\n');
   }
 
+  /**
+   * Classify tabs by creating a separate choice question for each tab.
+   * Each question is named with the tab ID to map results back.
+   */
   async classifyTabs(
     tabs: TabItem[],
     customCategories?: TabCategory[],
@@ -281,77 +302,80 @@ export class AiService {
       criteria[cat] = cat;
     }
 
-    const state = this.buildState(tabs);
+    // Process in batches to avoid oversized requests
+    const results: TabClassification[] = [];
+    for (
+      let batchStart = 0;
+      batchStart < tabs.length;
+      batchStart += MAX_BATCH_SIZE
+    ) {
+      const batch = tabs.slice(batchStart, batchStart + MAX_BATCH_SIZE);
 
-    return this.enqueue(async () => {
+      // Create a separate classification question for each tab in the batch
+      const questions: Record<string, JevQuestion> = {};
+      for (const tab of batch) {
+        questions[`classify_${tab.id}`] = {
+          type: 'choice',
+          instructions:
+            'Classify this browser tab into exactly one category based on its title and domain.',
+          criteria,
+        };
+      }
+
       const response = await this.callJev({
         model: JEV_MODEL,
-        state,
-        questions: {
-          classification: {
-            type: 'choice',
-            instructions:
-              'Classify this browser tab into exactly one category based on its title and domain.',
-            criteria,
-          },
-        },
+        state: batch.map(this.sanitizeTab).join('\n'),
+        questions,
       });
 
-      const answer = response.answers.classification as
-        JevChoiceAnswer | undefined;
-      const category = answer?.choice;
-      const probabilities = answer?.probabilities ?? {};
+      // Map answers back to tabs using question IDs
+      for (const tab of batch) {
+        const answer = response.answers[`classify_${tab.id}`] as
+          JevChoiceAnswer | undefined;
+        const category = answer?.choice;
+        const probabilities = answer?.probabilities ?? {};
+        const confidence = category ? (probabilities[category] ?? 0) : 0;
 
-      const results: TabClassification[] = [];
-      for (let i = 0; i < tabs.length; i++) {
-        // Note: Jev evaluates all inputs against the same question with the same state.
-        // For per-tab classification, we'd need a different approach.
-        // For now, we use the same classification for all tabs in the batch.
-        // In practice, Jev evaluates each input independently against the state.
-        // The state contains all tabs, so Jev can classify each.
-        // However, the current API doesn't support per-input questions directly.
-        // We'll need to include tab-specific info in the state.
-        const cat = category;
-        const confidence = cat ? (probabilities[cat] ?? 0) : 0;
-
-        if (cat && categories.includes(cat as TabCategory)) {
+        if (category && categories.includes(category as TabCategory)) {
           results.push({
-            tabId: tabs[i]!.id,
-            category: cat as TabCategory,
+            tabId: tab.id,
+            category: category as TabCategory,
             confidence,
-            reasoning: `Jev classified as ${cat}`,
+            reasoning: `Jev classified as ${category}`,
           });
         } else {
           const fallbackCategory = categories[0] as TabCategory;
           results.push({
-            tabId: tabs[i]!.id,
+            tabId: tab.id,
             category: fallbackCategory,
             confidence: 0,
             reasoning: 'Classification failed, defaulted',
           });
         }
       }
+    }
 
-      // Merge with existing user classifications (user overrides AI)
-      const merged = [...results];
-      if (existingClassifications) {
-        for (const [tabId, userCls] of Object.entries(
-          existingClassifications,
-        )) {
-          const idx = merged.findIndex((c) => c.tabId === Number(tabId));
-          if (idx >= 0) {
-            merged[idx] = userCls;
-          } else {
-            merged.push(userCls);
-          }
+    // Merge with existing user classifications (user overrides AI)
+    const merged = [...results];
+    if (existingClassifications) {
+      for (const [tabId, userCls] of Object.entries(existingClassifications)) {
+        const idx = merged.findIndex((c) => c.tabId === Number(tabId));
+        if (idx >= 0) {
+          merged[idx] = userCls;
+        } else {
+          merged.push(userCls);
         }
       }
+    }
 
-      this.setCache(cacheKey, merged);
-      return merged;
-    });
+    this.setCache(cacheKey, merged);
+    return merged;
   }
 
+  /**
+   * Route tabs to workspaces with per-tab evaluation.
+   * Each tab gets its own routing question.
+   */
   async routeTabs(
     tabs: TabItem[],
     workspaces: Workspace[],
@@ -369,41 +393,47 @@ export class AiService {
       criteria[ws.id] = ws.name;
     }
 
-    const state = this.buildState(tabs);
+    const results: WorkspaceRecommendation[] = [];
 
-    return this.enqueue(async () => {
+    // Process in batches
+    for (
+      let batchStart = 0;
+      batchStart < tabs.length;
+      batchStart += MAX_BATCH_SIZE
+    ) {
+      const batch = tabs.slice(batchStart, batchStart + MAX_BATCH_SIZE);
+
+      const questions: Record<string, JevQuestion> = {};
+      for (const tab of batch) {
+        questions[`route_${tab.id}`] = {
+          type: 'choice',
+          instructions:
+            'Select the best workspace for this tab from the available workspaces.',
+          criteria,
+        };
+      }
+
       const response = await this.callJev({
         model: JEV_MODEL,
-        state,
-        questions: {
-          routing: {
-            type: 'choice',
-            instructions:
-              'Select the best workspace for this tab from the available workspaces.',
-            criteria,
-          },
-        },
+        state: batch.map(this.sanitizeTab).join('\n'),
+        questions,
       });
 
-      const answer = response.answers.routing as JevChoiceAnswer | undefined;
-      const choice = answer?.choice;
-      const probabilities = answer?.probabilities ?? {};
-
       const validWorkspaceIds = new Set(workspaces.map((w) => w.id));
-      const results: WorkspaceRecommendation[] = [];
 
-      // Note: Jev evaluates all inputs against the same state/questions.
-      // For per-tab routing, we'd need per-tab state or a different approach.
-      // For now, we use the same routing for all tabs in the batch.
-      // In practice, we'd include tab-specific info in the state per request.
-      for (let i = 0; i < tabs.length; i++) {
+      for (const tab of batch) {
+        const answer = response.answers[`route_${tab.id}`] as
+          JevChoiceAnswer | undefined;
+        const choice = answer?.choice;
+        const probabilities = answer?.probabilities ?? {};
+
         if (choice) {
           const workspaceId = choice.split(':')[0]!;
           const workspace = workspaces.find((w) => w.id === workspaceId)!;
-          if (workspace && validWorkspaceIds.has(workspaceId)) {
+          if (workspaceId && workspace && validWorkspaceIds.has(workspaceId)) {
             const confidence = probabilities[choice] ?? 0;
             results.push({
-              tabId: tabs[i]!.id,
+              tabId: tab.id,
               workspaceId,
               workspaceName: workspace.name,
               reason: `Jev routed to ${workspace.name}`,
@@ -412,90 +442,129 @@ export class AiService {
           }
         }
       }
+    }
 
-      this.setCache(cacheKey, results);
-      return results;
-    });
+    this.setCache(cacheKey, results);
+    return results;
   }
 
+  /**
+   * Group tabs by creating a topic question per tab, then clustering tabs
+   * with matching topics. This provides per-tab topic assignment.
+   */
   async groupTabs(tabs: TabItem[]): Promise<RelatedTabGroup[]> {
     const cacheKey = this.getCacheKey('group', tabs);
     const cached = this.getFromCache<RelatedTabGroup[]>(cacheKey);
     if (cached) return cached;
 
-    const state = this.buildState(tabs);
+    const criteria: Record<string, string> = { none: 'No group' };
+    for (const topic of TOPIC_CHOICES) {
+      criteria[topic] = topic;
+    }
 
-    return this.enqueue(async () => {
+    const topicGroups = new Map<string, number[]>();
+
+    // Process in batches to get topic per tab
+    for (
+      let batchStart = 0;
+      batchStart < tabs.length;
+      batchStart += MAX_BATCH_SIZE
+    ) {
+      const batch = tabs.slice(batchStart, batchStart + MAX_BATCH_SIZE);
+      const state = batch.map(this.sanitizeTab).join('\n');
+
+      const questions: Record<string, JevQuestion> = {};
+      for (const tab of batch) {
+        questions[`topic_${tab.id}`] = {
+          type: 'choice',
+          instructions:
+            'What is the main topic of this tab? Choose the most specific topic, or "none" if no group fits.',
+          criteria: {
+            none: 'No group fits this tab',
+            ...Object.fromEntries(TOPIC_CHOICES.map((t) => [t, t])),
+          },
+        };
+      }
+
       const response = await this.callJev({
         model: JEV_MODEL,
         state,
-        questions: {
-          grouping: {
-            type: 'choice',
-            instructions:
-              'Identify groups of tabs discussing the same project or topic. Return the group topic name, or "none" if no groups found.',
-            criteria: {
-              none: 'No groups found',
-              ...Object.fromEntries(TOPIC_CHOICES.map((t) => [t, t])),
-            },
-          },
-        },
+        questions,
       });
 
-      const answer = response.answers.grouping as JevChoiceAnswer | undefined;
-      const topic = answer?.choice;
-
-      // Note: Jev choice question returns a single topic for the entire state.
-      // For grouping, we need a different approach - Jev doesn't support
-      // multi-label or set-returning questions directly.
-      // This is a limitation of the current Jev API.
-      // We'll return empty groups for now and note this limitation.
-      const results: RelatedTabGroup[] = [];
-      if (topic && topic !== 'Other' && topic !== 'none') {
-        // We can't determine which tabs belong to the group from a single choice answer
-        // This would require a different approach (multiple questions or different model)
-        // For now, we return empty groups
+      for (const tab of batch) {
+        const answer = response.answers[`topic_${tab.id}`] as
+          JevChoiceAnswer | undefined;
+        const topic = answer?.choice;
+        if (topic && topic !== 'Other') {
+          const existingGroup = topicGroups.get(topic!);
+          const group = existingGroup ?? [];
+          group.push(tab.id);
+          topicGroups.set(topic!, group);
+        }
       }
+    }
 
-      this.setCache(cacheKey, results);
-      return results;
-    });
+    const results: RelatedTabGroup[] = [];
+    for (const [topic, tabIds] of topicGroups) {
+      if (tabIds.length >= 2) {
+        results.push({
+          tabs: tabIds,
+          topic: topic.slice(0, 30),
+          description: `Tabs related to ${topic}`,
+        });
+      }
+    }
+
+    this.setCache(cacheKey, results);
+    return results;
   }
 
+  /**
+   * Score focus relevance per tab with individual score questions.
+   */
   async scoreFocus(tabs: TabItem[], goal: string): Promise<FocusRelevance[]> {
     const cacheKey = this.getCacheKey(`focus:${goal}`, tabs);
     const cached = this.getFromCache<FocusRelevance[]>(cacheKey);
     if (cached) return cached;
 
-    const state = this.buildState(tabs);
+    const results: FocusRelevance[] = [];
 
-    return this.enqueue(async () => {
+    for (
+      let batchStart = 0;
+      batchStart < tabs.length;
+      batchStart += MAX_BATCH_SIZE
+    ) {
+      const batch = tabs.slice(batchStart, batchStart + MAX_BATCH_SIZE);
+      const state = batch.map(this.sanitizeTab).join('\n');
+
+      const questions: Record<string, JevQuestion> = {};
+      for (const tab of batch) {
+        questions[`focus_${tab.id}`] = {
+          type: 'score',
+          instructions: `Score how relevant this tab is to the user's focus goal: "${goal}". 0 = not relevant, 1 = highly relevant.`,
+          criteria: [
+            'not relevant',
+            'slightly relevant',
+            'moderately relevant',
+            'highly relevant',
+            'critically relevant',
+          ],
+        };
+      }
+
       const response = await this.callJev({
         model: JEV_MODEL,
         state,
-        questions: {
-          focus: {
-            type: 'score',
-            instructions: `Score how relevant each tab is to the user's focus goal: "${goal}". 0 = not relevant, 1 = highly relevant.`,
-            criteria: [
-              'not relevant',
-              'slightly relevant',
-              'moderately relevant',
-              'highly relevant',
-              'critically relevant',
-            ],
-          },
-        },
+        questions,
       });
 
-      const answer = response.answers.focus as JevScoreAnswer | undefined;
-      const score = answer?.score ?? 0;
-      const normalized = answer?.normalized ?? 0;
+      for (const tab of batch) {
+        const answer = response.answers[`focus_${tab.id}`] as
+          JevScoreAnswer | undefined;
+        const score = answer?.score ?? 0;
+        const normalized = answer?.normalized ?? 0;
 
-      // Note: Same limitation - single score for all tabs in the state
-      // We'll return the same score for all tabs
-      const results: FocusRelevance[] = [];
-      for (let i = 0; i < tabs.length; i++) {
         const reason =
           score >= 4
             ? 'Critically relevant to focus goal'
@@ -506,29 +575,33 @@ export class AiService {
                 : score >= 1
                   ? 'Slightly relevant'
                   : 'Not relevant';
+
         results.push({
-          tabId: tabs[i]!.id,
+          tabId: tab.id,
           score: normalized,
           reason,
         });
       }
+    }
 
-      this.setCache(cacheKey, results);
-      return results;
-    });
+    this.setCache(cacheKey, results);
+    return results;
   }
 
+  /**
+   * Evaluate cleanup per tab with individual cleanup questions.
+   * Local exact-duplicate detection runs first (deterministic).
+   */
   async suggestCleanup(tabs: TabItem[]): Promise<CleanupSuggestion[]> {
-    // First check for exact URL duplicates locally
+    // First check for exact URL duplicates locally (deterministic)
     const urlMap = new Map<string, number[]>();
     for (const tab of tabs) {
       const rawUrl = tab.url?.trim();
       if (!rawUrl) continue;
       const hashIndex = rawUrl.indexOf('#');
-      const queryIndex = rawUrl.indexOf('?');
       let baseUrl = rawUrl;
       if (hashIndex >= 0) baseUrl = rawUrl.slice(0, hashIndex);
-      if (queryIndex >= 0) baseUrl = rawUrl.slice(0, queryIndex);
+      // Keep query parameters for duplicate detection - only strip fragment
       const normalized = baseUrl;
       const existing = urlMap.get(normalized) ?? [];
       existing.push(tab.id);
@@ -546,54 +619,60 @@ export class AiService {
       }
     }
 
-    // Use Jev for semantic cleanup detection
+    // Use Jev for semantic cleanup detection per tab
     const cacheKey = this.getCacheKey('cleanup', tabs);
     const cached = this.getFromCache<CleanupSuggestion[]>(cacheKey);
     if (cached) return [...localDuplicates, ...cached];
 
-    const state = this.buildState(tabs);
+    const state = tabs.map(this.sanitizeTab).join('\n');
+    const results: CleanupSuggestion[] = [];
 
-    const semantic = await this.enqueue(async () => {
+    for (
+      let batchStart = 0;
+      batchStart < tabs.length;
+      batchStart += MAX_BATCH_SIZE
+    ) {
+      const batch = tabs.slice(batchStart, batchStart + MAX_BATCH_SIZE);
+
+      const questions: Record<string, JevQuestion> = {};
+      for (const tab of batch) {
+        questions[`cleanup_${tab.id}`] = {
+          type: 'choice',
+          instructions:
+            'Should this tab be cleaned up? Choose the type of cleanup if applicable.',
+          criteria: {
+            keep: 'Tab is useful and should be kept',
+            duplicate: 'Tab is a semantic duplicate of another tab',
+            stale: 'Tab is outdated or no longer relevant',
+            'low-value': 'Tab provides little value',
+          },
+        };
+      }
+
       const response = await this.callJev({
         model: JEV_MODEL,
         state,
-        questions: {
-          cleanup: {
-            type: 'choice',
-            instructions:
-              'Should this tab be cleaned up? Choose the type of cleanup if applicable.',
-            criteria: {
-              keep: 'Tab is useful and should be kept',
-              duplicate: 'Tab is a semantic duplicate of another tab',
-              stale: 'Tab is outdated or no longer relevant',
-              'low-value': 'Tab provides little value',
-            },
-          },
-        },
+        questions,
       });
 
-      const answer = response.answers.cleanup as JevChoiceAnswer | undefined;
-      const choice = answer?.choice;
+      for (const tab of batch) {
+        const answer = response.answers[`cleanup_${tab.id}`] as
+          JevChoiceAnswer | undefined;
+        const choice = answer?.choice;
 
-      const results: CleanupSuggestion[] = [];
-      if (choice && choice !== 'keep') {
-        // Note: Single choice for all tabs - limitation of current approach
-        // We'll apply to all tabs for now
-        for (let i = 0; i < tabs.length; i++) {
+        if (choice && choice !== 'keep') {
           results.push({
             type: choice as CleanupSuggestion['type'],
-            tabIds: [tabs[i]!.id],
+            tabIds: [tab.id],
             description: `Jev suggested ${choice}`,
           });
         }
       }
+    }
 
-      return results
-        .filter((s) => s.tabIds.length > 0)
-        .filter((s) =>
-          s.tabIds.every((id: number) => tabs.some((t) => t.id === id)),
-        );
-    });
+    const semantic = results.filter((s) =>
+      s.tabIds.every((id: number) => tabs.some((t) => t.id === id)),
+    );
 
     this.setCache(cacheKey, semantic);
     return [...localDuplicates, ...semantic];
