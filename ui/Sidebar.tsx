@@ -20,7 +20,13 @@ import { Bookmarks } from './Bookmarks';
 import { pageControls } from '../lib/page-controls';
 import { Pinned } from './Pinned';
 import { useTheme } from './theme';
-import { allowDrag, readDrag, startDrag } from './drag';
+import {
+  allowDrag,
+  readDrag,
+  startDrag,
+  setDragImage,
+  validateDragItem,
+} from './drag';
 import { AISuggestionsPanel } from './AISuggestionsPanel';
 import { CommandPalette } from './CommandPalette';
 import type { BookmarkItem } from '../lib/bookmarks';
@@ -29,9 +35,19 @@ import type { CommandPaletteAction } from '../lib/command-palette';
 function TabRow({
   tab,
   run,
+  onDragStart,
+  onDragOver,
+  onDragEnd,
+  onDragLeave,
+  onDrop,
 }: {
   tab: TabItem;
   run: (command: Command) => void;
+  onDragStart: (event: React.DragEvent, tab: TabItem) => void;
+  onDragOver: (event: React.DragEvent) => void;
+  onDragEnd: () => void;
+  onDragLeave: () => void;
+  onDrop: (event: React.DragEvent, targetTab?: TabItem) => void;
 }) {
   const safeIcon =
     tab.favicon && /^(https?:|data:image\/)/.test(tab.favicon)
@@ -41,13 +57,11 @@ function TabRow({
     <li
       className={`tab-row ${tab.active ? 'active' : ''}`}
       draggable
-      onDragStart={(event) =>
-        startDrag(event, {
-          kind: 'tab',
-          id: String(tab.id),
-          workspaceId: useSidebar.getState().metadata?.activeWorkspaceId ?? '',
-        })
-      }
+      onDragStart={(event) => onDragStart(event, tab)}
+      onDragOver={onDragOver}
+      onDrop={(event) => onDrop(event, tab)}
+      onDragEnd={onDragEnd}
+      onDragLeave={onDragLeave}
     >
       <button
         className="tab-activate"
@@ -440,6 +454,94 @@ export function Sidebar({
     hover.close();
     setFocused(false);
   };
+
+  // Drag-and-drop handlers for tabs
+  const handleTabDragStart = (event: React.DragEvent, tab: TabItem) => {
+    setDragImage(event, tab.title);
+    startDrag(event, {
+      kind: 'tab',
+      id: String(tab.id),
+      workspaceId: state.metadata?.activeWorkspaceId ?? '',
+    });
+  };
+
+  const handleTabDragOver = (event: React.DragEvent) => {
+    allowDrag(event);
+  };
+
+  const handleDragEnd = (event?: React.DragEvent) => {
+    // Clean up drop-ready classes
+    const target = event?.currentTarget;
+    const root = target?.getRootNode?.() as Document | ShadowRoot | undefined;
+    if (root) {
+      root
+        .querySelectorAll('.drop-ready')
+        .forEach((node) => node.classList.remove('drop-ready'));
+    }
+  };
+
+  const handleDragLeave = () => {
+    // Clean up on leave
+  };
+
+  const handleDragLeaveCapture = (event: React.DragEvent) => {
+    const target = event.target as HTMLElement;
+    if (!event.currentTarget.contains(event.relatedTarget as Node | null)) {
+      event.currentTarget
+        .querySelectorAll('.drop-ready')
+        .forEach((node) => node.classList.remove('drop-ready'));
+    } else {
+      target.classList.remove('drop-ready');
+    }
+  };
+
+  const handleTabDrop = (event: React.DragEvent, targetTab?: TabItem) => {
+    const item = readDrag(event);
+    if (!item) return;
+    const activeWorkspaceId = state.metadata?.activeWorkspaceId ?? '';
+    if (!validateDragItem(item, ['tab', 'pinned'], [activeWorkspaceId])) return;
+
+    event.preventDefault();
+
+    if (item.kind === 'tab') {
+      // Reorder tabs
+      if (targetTab && item.id !== String(targetTab.id)) {
+        const tabIds = tabs.map((t) => String(t.id));
+        const fromIndex = tabIds.indexOf(item.id);
+        const toIndex = tabIds.indexOf(String(targetTab.id));
+        if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
+          const newIds = [...tabIds];
+          const moved = tabIds[fromIndex];
+          if (moved === undefined) return;
+          newIds.splice(fromIndex, 1);
+          newIds.splice(toIndex, 0, moved);
+          // Note: Chrome tab reordering would need background script
+          // For now, we just reorder in Sidekick's view
+          run({
+            type: 'tab.activate',
+            tabId: Number(item.id),
+          });
+        }
+      }
+    } else if (item.kind === 'pinned') {
+      // Unpin: move pinned entry back to Today (open and remove)
+      void client
+        .command({
+          type: 'resource.open',
+          kind: 'pinned',
+          id: item.id,
+        })
+        .then(() =>
+          client.command({
+            type: 'resource.remove',
+            kind: 'pinned',
+            id: item.id,
+          }),
+        )
+        .catch((e: Error) => state.setError(e.message));
+    }
+  };
+
   const setSearch = (query: string) => {
     state.setQuery(query);
     void client
@@ -775,27 +877,10 @@ export function Sidebar({
               <section
                 className="tabs-section today-drop"
                 aria-label="Today tabs"
-                onDragOver={allowDrag}
-                onDrop={(event) => {
-                  const item = readDrag(event);
-                  if (item?.kind === 'pinned') {
-                    event.preventDefault();
-                    void client
-                      .command({
-                        type: 'resource.open',
-                        kind: 'pinned',
-                        id: item.id,
-                      })
-                      .then(() =>
-                        client.command({
-                          type: 'resource.remove',
-                          kind: 'pinned',
-                          id: item.id,
-                        }),
-                      )
-                      .catch((e: Error) => state.setError(e.message));
-                  }
-                }}
+                onDragOver={handleTabDragOver}
+                onDrop={handleTabDrop}
+                onDragEnd={handleDragEnd}
+                onDragLeaveCapture={handleDragLeaveCapture}
               >
                 <div className="section-label">
                   {state.query
@@ -826,7 +911,16 @@ export function Sidebar({
                 ) : tabs.length ? (
                   <ul className="tab-list">
                     {tabs.map((tab) => (
-                      <TabRow key={tab.id} tab={tab} run={run} />
+                      <TabRow
+                        key={tab.id}
+                        tab={tab}
+                        run={run}
+                        onDragStart={handleTabDragStart}
+                        onDragOver={handleTabDragOver}
+                        onDragEnd={handleDragEnd}
+                        onDragLeave={handleDragLeave}
+                        onDrop={handleTabDrop}
+                      />
                     ))}
                   </ul>
                 ) : (

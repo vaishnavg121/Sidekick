@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import type { SidebarClient } from '../lib/client';
 import type { PinnedEntry, Folder } from '../lib/models';
 import type { Command } from '../lib/protocol';
@@ -6,7 +6,13 @@ import { useSidebar } from '../lib/store';
 import { moveBefore } from '../lib/ordering';
 import { ResourceEditor } from './ResourceEditor';
 import { SiteIcon } from './SiteIcon';
-import { allowDrag, readDrag, startDrag } from './drag';
+import {
+  allowDrag,
+  readDrag,
+  startDrag,
+  setDragImage,
+  validateDragItem,
+} from './drag';
 import { Icon } from './Icon';
 
 export function Pinned({ client }: { client: SidebarClient }) {
@@ -16,18 +22,24 @@ export function Pinned({ client }: { client: SidebarClient }) {
   const [folderEditor, setFolderEditor] = useState<Folder | 'new'>();
   const metadata = state.metadata;
   const workspaceId = metadata?.activeWorkspaceId ?? '';
-  const entries =
-    metadata?.pinnedEntries
-      .filter((e) => e.workspaceId === workspaceId)
-      .sort((a, b) => a.order - b.order) ?? [];
-  const folders =
-    metadata?.folders
-      .filter((f) => f.workspaceId === workspaceId)
-      .sort((a, b) => a.order - b.order) ?? [];
   const run = (command: Command) => {
     void client.command(command).catch((e: Error) => state.setError(e.message));
     setMenu(undefined);
   };
+  const entries = useMemo(
+    () =>
+      metadata?.pinnedEntries
+        .filter((e) => e.workspaceId === workspaceId)
+        .sort((a, b) => a.order - b.order) ?? [],
+    [metadata, workspaceId],
+  );
+  const folders = useMemo(
+    () =>
+      metadata?.folders
+        .filter((f) => f.workspaceId === workspaceId)
+        .sort((a, b) => a.order - b.order) ?? [],
+    [metadata, workspaceId],
+  );
   const drop = (
     event: React.DragEvent,
     folderId: string | null,
@@ -35,6 +47,7 @@ export function Pinned({ client }: { client: SidebarClient }) {
   ) => {
     const item = readDrag(event);
     if (!item) return;
+    if (!validateDragItem(item, ['tab', 'pinned'], [workspaceId])) return;
     event.preventDefault();
     event.stopPropagation();
     if (item.kind === 'tab')
@@ -68,20 +81,40 @@ export function Pinned({ client }: { client: SidebarClient }) {
         });
     }
   };
+  const handleDragStart = (event: React.DragEvent, entry: PinnedEntry) => {
+    startDrag(event, { kind: 'pinned', id: entry.id, workspaceId });
+    setDragImage(event, entry.title);
+  };
+  const handleDragOver = (event: React.DragEvent) => {
+    allowDrag(event);
+  };
+  const handleDragEnd = (event?: React.DragEvent) => {
+    // Clean up drop-ready classes
+    const target = event?.currentTarget;
+    const root = target?.getRootNode?.() as Document | ShadowRoot | undefined;
+    if (root) {
+      root
+        .querySelectorAll('.drop-ready')
+        .forEach((node) => node.classList.remove('drop-ready'));
+    }
+  };
+  const handleDragLeave = () => {
+    // Clean up on leave
+  };
   const renderEntry = (entry: PinnedEntry) => {
-    const siblings = entries.filter((e) => e.folderId === entry.folderId);
-    const index = siblings.findIndex((e) => e.id === entry.id);
+    const siblingEntries = entries.filter((e) => e.folderId === entry.folderId);
+    const siblingIndex = siblingEntries.findIndex((e) => e.id === entry.id);
     return (
       <li
         key={entry.id}
         className="pinned-row"
         draggable
         data-resource-id={entry.id}
-        onDragStart={(event) =>
-          startDrag(event, { kind: 'pinned', id: entry.id, workspaceId })
-        }
-        onDragOver={allowDrag}
+        onDragStart={(event) => handleDragStart(event, entry)}
+        onDragOver={handleDragOver}
         onDrop={(event) => drop(event, entry.folderId, entry)}
+        onDragEnd={handleDragEnd}
+        onDragLeave={handleDragLeave}
       >
         <button
           className={
@@ -130,7 +163,7 @@ export function Pinned({ client }: { client: SidebarClient }) {
             </button>
             <button
               role="menuitem"
-              disabled={!index}
+              disabled={siblingIndex === 0}
               onClick={() =>
                 run({
                   type: 'resource.reorder',
@@ -138,9 +171,9 @@ export function Pinned({ client }: { client: SidebarClient }) {
                   workspaceId,
                   folderId: entry.folderId,
                   ids: moveBefore(
-                    siblings.map((e) => e.id),
+                    siblingEntries.map((e) => e.id),
                     entry.id,
-                    siblings[index - 1]!.id,
+                    siblingEntries[siblingIndex - 1]!.id,
                   ),
                 })
               }
@@ -214,8 +247,10 @@ export function Pinned({ client }: { client: SidebarClient }) {
       key={folder.id}
       className="pinned-folder"
       data-folder-id={folder.id}
-      onDragOver={allowDrag}
+      onDragOver={handleDragOver}
       onDrop={(event) => drop(event, folder.id)}
+      onDragLeave={handleDragLeave}
+      onDragEnd={handleDragEnd}
     >
       <div className="pinned-folder-heading">
         <button
@@ -252,8 +287,10 @@ export function Pinned({ client }: { client: SidebarClient }) {
     <section
       className="pinned-section resources-compact"
       aria-label="Workspace pinned tabs"
-      onDragOver={allowDrag}
+      onDragOver={handleDragOver}
       onDrop={(event) => drop(event, null)}
+      onDragLeave={handleDragLeave}
+      onDragEnd={handleDragEnd}
     >
       <div className="section-label">
         PINNED
