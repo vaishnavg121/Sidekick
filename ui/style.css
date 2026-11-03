@@ -1006,6 +1006,58 @@ body,
   margin-top: 3px;
   color: var(--sk-muted);
 }
+.workspace-strip {
+  display: flex;
+  gap: 4px;
+  padding: 4px 8px;
+  flex-wrap: wrap;
+}
+.workspace-icon {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition:
+    transform 0.1s,
+    box-shadow 0.1s;
+  position: relative;
+}
+.workspace-icon:hover {
+  transform: scale(1.05);
+  box-shadow: 0 2px 8px #0006;
+}
+.workspace-icon.active {
+  box-shadow: 0 0 0 2px var(--sk-accent);
+}
+.workspace-icon.drop-target {
+  box-shadow: 0 0 0 2px var(--sk-accent);
+  background-color: var(--sk-accent) 20;
+}
+.workspace-icon-inner {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--sk-text);
+  text-shadow: 0 1px 2px #0004;
+}
+.active-indicator {
+  position: absolute;
+  bottom: 2px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--sk-accent);
+}
+.workspace-icon[draggable='true'] {
+  cursor: grab;
+}
+.workspace-icon[draggable='true']:active {
+  cursor: grabbing;
+}
 .navigation {
   margin: 0 10px 7px;
 }

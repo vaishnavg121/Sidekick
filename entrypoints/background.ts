@@ -355,6 +355,16 @@ export default defineBackground(() => {
             case 'tab.create':
               await chrome.tabs.create({ windowId });
               break;
+            case 'tab.move': {
+              const tab = await chrome.tabs.get(c.tabId);
+              if (!tab || tab.windowId !== c.windowId)
+                throw new Error('Tab not found in the specified window.');
+              await chrome.tabs.move(c.tabId, { index: c.index });
+              if (c.workspaceId) {
+                await windows.setActiveWorkspaceId(c.windowId, c.workspaceId);
+              }
+              break;
+            }
             case 'preferences.update':
               if (c.patch.mode && c.patch.mode !== 'pinned')
                 await panels.setMode(windowId, c.patch.mode);
@@ -634,6 +644,10 @@ export default defineBackground(() => {
             case 'command-palette.action': {
               // Actions are executed client-side via the sidebar client
               // This case is for logging/analytics if needed
+              break;
+            }
+            case 'tab.updateWorkspace': {
+              await windows.setActiveWorkspaceId(windowId, c.workspaceId);
               break;
             }
           }

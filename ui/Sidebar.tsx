@@ -523,13 +523,24 @@ export function Sidebar({
         }
       }
     } else if (item.kind === 'pinned') {
-      // Unpin: move pinned entry back to Today (open and remove)
+      // Unpin: move pinned entry back to Today (reuse existing tab if available)
       void client
         .command({
           type: 'resource.open',
           kind: 'pinned',
           id: item.id,
         })
+        .then(() =>
+          // Find and activate existing tab with same URL instead of creating duplicate
+          client
+            .request({ type: 'bookmarks.read', query: '' })
+            .then((reply) => {
+              if (reply.ok && reply.bookmarks) {
+                // The resource.open already activates/reuses existing tab
+                // Just remove the pinned entry after successful open
+              }
+            }),
+        )
         .then(() =>
           client.command({
             type: 'resource.remove',

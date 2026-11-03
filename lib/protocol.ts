@@ -80,7 +80,13 @@ export type Command =
   | AuthorCommand
   | { type: 'tab.activate' | 'tab.close'; tabId: number }
   | { type: 'tab.create' }
-  | { type: 'tab.move'; tabId: number; windowId: number; index: number }
+  | {
+      type: 'tab.move';
+      tabId: number;
+      windowId: number;
+      index: number;
+      workspaceId?: string;
+    }
   | { type: 'immersive.enter' | 'immersive.exit' }
   | { type: 'navigation.go'; input: string; newTab?: boolean }
   | {
@@ -118,7 +124,8 @@ export type Command =
       type: 'command-palette.action';
       action: string;
       payload: Record<string, unknown>;
-    };
+    }
+  | { type: 'tab.updateWorkspace'; tabId: number; workspaceId: string };
 export type Request = {
   channel: 'sidekick';
   windowId?: number;
@@ -254,7 +261,9 @@ export function isCommand(value: unknown): value is Command {
         c.windowId > 0 &&
         typeof c.index === 'number' &&
         Number.isInteger(c.index) &&
-        c.index >= 0
+        c.index >= 0 &&
+        (c.workspaceId === undefined ||
+          (typeof c.workspaceId === 'string' && c.workspaceId.length < 200))
       );
     case 'panel.pin':
     case 'immersive.enter':
@@ -457,6 +466,14 @@ export function isCommand(value: unknown): value is Command {
         !Array.isArray(payload)
       );
     }
+    case 'tab.updateWorkspace':
+      return (
+        typeof c.tabId === 'number' &&
+        Number.isInteger(c.tabId) &&
+        c.tabId >= 0 &&
+        typeof c.workspaceId === 'string' &&
+        c.workspaceId.length < 200
+      );
     default:
       return false;
   }

@@ -7,11 +7,13 @@ export interface WindowUiState {
   restoreState?: 'normal' | 'maximized';
   nativeDocumentId?: string;
   notice?: string;
+  activeWorkspaceId?: string;
 }
 export const EMPTY_WINDOW_STATE: WindowUiState = {
   query: '',
   nativePanelOpen: false,
   immersive: false,
+  activeWorkspaceId: undefined,
 };
 const KEY = 'sidekick.window-ui.v1';
 
@@ -50,6 +52,16 @@ export class WindowStateRepository {
         delete values[windowId]!.notice;
       await this.area.set({ [KEY]: values });
     });
+  }
+  async getActiveWorkspaceId(windowId: number): Promise<string | undefined> {
+    const state = await this.get(windowId);
+    return state.activeWorkspaceId;
+  }
+  async setActiveWorkspaceId(
+    windowId: number,
+    workspaceId: string,
+  ): Promise<void> {
+    await this.update(windowId, { activeWorkspaceId: workspaceId });
   }
   remove(windowId: number): Promise<void> {
     return this.serial(async () => {
