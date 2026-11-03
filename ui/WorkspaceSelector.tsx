@@ -42,7 +42,10 @@ export function WorkspaceSelector({
     event.currentTarget.classList.remove('drop-target');
     const item = readDrag(event);
     if (!item) return;
-    if (!validateDragItem(item, ['tab', 'favorite', 'pinned'], [workspaceId]))
+    // Validate that the item belongs to its claimed source workspace
+    if (
+      !validateDragItem(item, ['tab', 'favorite', 'pinned'], [item.workspaceId])
+    )
       return;
 
     if (item.kind === 'tab') {

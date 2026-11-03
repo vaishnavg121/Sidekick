@@ -251,6 +251,7 @@ export function isCommand(value: unknown): value is Command {
     case 'tab.close':
       return Number.isInteger(c.tabId) && Number(c.tabId) >= 0;
     case 'tab.create':
+      return true;
     case 'tab.move':
       return (
         typeof c.tabId === 'number' &&
