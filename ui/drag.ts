@@ -17,7 +17,11 @@ export function readDrag(event: DragEvent): DragItem | undefined {
     .querySelectorAll('.drop-ready')
     .forEach((node) => node.classList.remove('drop-ready'));
   try {
-    const value = JSON.parse(event.dataTransfer.getData(DRAG_TYPE)) as DragItem;
+    const value = JSON.parse(
+      (event.nativeEvent?.dataTransfer ?? event.dataTransfer).getData(
+        DRAG_TYPE,
+      ),
+    ) as DragItem;
     if (
       ['favorite', 'pinned', 'tab', 'folder', 'workspace'].includes(
         value.kind,

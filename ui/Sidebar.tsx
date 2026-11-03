@@ -531,17 +531,6 @@ export function Sidebar({
           id: item.id,
         })
         .then(() =>
-          // Find and activate existing tab with same URL instead of creating duplicate
-          client
-            .request({ type: 'bookmarks.read', query: '' })
-            .then((reply) => {
-              if (reply.ok && reply.bookmarks) {
-                // The resource.open already activates/reuses existing tab
-                // Just remove the pinned entry after successful open
-              }
-            }),
-        )
-        .then(() =>
           client.command({
             type: 'resource.remove',
             kind: 'pinned',
