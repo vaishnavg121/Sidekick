@@ -690,7 +690,7 @@ test('loads MV3; hover, tabs, navigation, persistence, native fallback and worke
     page.locator('style[wxt-shadow-root-document-styles]'),
   ).toHaveCount(0);
   expect(await sidebar.evaluate((e) => getComputedStyle(e).fontSize)).toBe(
-    '13px',
+    '12px',
   );
   await page.mouse.move(800, 500);
   await expect(sidebar).toBeHidden();

@@ -8,7 +8,7 @@ await mkdir('playwright-report', { recursive: true });
 const baselinePath = resolve('playwright-report/baseline-palette.ts');
 await writeFile(
   baselinePath,
-  execFileSync('git', ['show', '67089b4:lib/command-palette.ts'], {
+  execFileSync('git', ['show', 'ec6b73d:lib/command-palette.ts'], {
     encoding: 'utf8',
   }),
 );

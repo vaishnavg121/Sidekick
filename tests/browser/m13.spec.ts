@@ -127,6 +127,7 @@ test('Docking visual: custom left sidebar reflows fixed/sticky content, resizes,
   for (const width of [1280, 1000, 900]) {
     await page.setViewportSize({ width, height: 900 });
     for (let repeat = 0; repeat < 3; repeat++) {
+      console.log('Docking cycle', width, repeat);
       if (
         !(await ui
           .getByRole('complementary', { includeHidden: true })
@@ -209,6 +210,7 @@ test('Docking visual: custom left sidebar reflows fixed/sticky content, resizes,
     }
   }
   await ui.getByRole('button', { name: 'Dock sidebar', exact: true }).click();
+  console.log('Docking settings resize');
   await ui.getByRole('button', { name: 'Open settings', exact: true }).click();
   await ui
     .getByRole('slider', { name: 'Sidebar width', exact: true })
