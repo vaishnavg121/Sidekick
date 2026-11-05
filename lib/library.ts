@@ -146,6 +146,7 @@ export function portableMetadata(m: Metadata): Metadata {
   return {
     version: 1,
     layoutVersion: 2,
+    appearance: m.appearance ? structuredClone(m.appearance) : undefined,
     activeWorkspaceId: m.activeWorkspaceId,
     workspaces: m.workspaces.map((w) => ({
       id: w.id,

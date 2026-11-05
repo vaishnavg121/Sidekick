@@ -1,12 +1,12 @@
 # Privacy and data handling
 
-Effective 5 November 2026 · Sidekick 0.2.0 beta
+Effective 6 November 2026 · Sidekick 0.3.0 beta
 
 Sidekick organizes tabs in your existing Chrome profile. It does not isolate cookies, accounts, passwords or browser profiles.
 
 ## Local information
 
-Extension storage holds workspace names/icons/themes/email labels, saved URLs/titles, Favorites, Pinned folders, preferences, accepted categories, rejected routes, Focus goals, snoozed reminders, URL session snapshots and archive entries. Tab/window handles, window selections/search and live Focus IDs stay in session storage.
+Extension storage holds workspace names/icons/themes/email labels, saved URLs/titles, Favorites, Pinned folders, preferences, accepted/dismissed categories, rejected routes, appearance settings, Focus goals, snoozed reminders, URL session snapshots and archive entries. Tab/window handles, window selections/search and live Focus IDs stay in session storage.
 
 A bounded set of local SHA-256 URL-hash window fingerprints reconciles reload/browser restoration. These contain hashes and workspace IDs, not raw live URLs or Chrome handles; up to 20 unmatched snapshots are retained. Hashes are a reconciliation aid, not a guarantee of anonymity. Ambiguous ownership falls back conservatively.
 
@@ -47,3 +47,9 @@ Individual resources and Library entries can be removed through the UI. Workspac
 | notifications (optional)   | Due reminder notifications after permission grant       |
 
 No history, cookies, debugger, scripting, webRequest, clipboard-read or password permission is requested. Contact/support: [Sidekick issues](https://github.com/vaishnavg121/Sidekick/issues). Never post keys or private browsing data in public issues.
+
+## Appearance and local verification tools
+
+Appearance colors, gradients, effects and workspace overrides stay in local extension metadata. Theme-only JSON exports contain appearance rather than account/browsing data. Imported configurations accept validated colors/numbers/enums, not executable CSS or remote image URLs. Preview changes do not write every slider movement to storage or modify website content styles. No new permission or telemetry was added for Appearance Studio.
+
+Repository-only live testing explicitly reads the ignored `.env.e2e.local` in the Node runner and uses trusted extension settings in a disposable profile. It is disabled by default, bounded to 25 requests per campaign and records sanitized status/counts, not headers or credentials. Profiles are removed after testing. This developer file and runner are not part of the production extension ZIP. The product continues to use normal secure BYOK settings.

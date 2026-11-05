@@ -1,3 +1,4 @@
+import type { AppearancePreferences } from './appearance';
 import type { Library } from './library';
 export type SidebarMode = 'hidden' | 'hover' | 'docked' | 'pinned';
 export type Theme = 'dark' | 'light' | 'system';
@@ -37,6 +38,7 @@ export interface Folder {
   collapsed?: boolean;
 }
 export interface Metadata {
+  appearance?: AppearancePreferences;
   library?: Library;
   onboardingDismissed?: boolean;
   version: 1;
@@ -51,6 +53,7 @@ export interface Metadata {
   aiState?: AiState;
 }
 export interface AiState {
+  dismissedCategoriesByUrl?: Record<string, TabCategory[]>;
   acceptedByUrl?: Record<
     string,
     { category: TabCategory; confidence: number; reasoning: string }

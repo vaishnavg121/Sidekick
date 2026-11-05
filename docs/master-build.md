@@ -1,5 +1,7 @@
 # Master build — implementation and acceptance ledger
 
+Historical v0.2.0 record. See [current v0.3.0 results](final-polish-results.md) and [Appearance Studio](appearance.md).
+
 Baseline: fetched `origin/main` = `67089b4f007d745c11fb839e9e2f8ec17854a82f` (4 November 2026). Clean checkout. This ledger records evidence, not promises of production readiness.
 
 ## Audit

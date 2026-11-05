@@ -8,6 +8,7 @@ import { ResourceEditor } from './ResourceEditor';
 import { SiteIcon } from './SiteIcon';
 import {
   allowDrag,
+  DRAG_TYPE,
   readDrag,
   startDrag,
   setDragImage,
@@ -101,6 +102,8 @@ export function Pinned({ client }: { client: SidebarClient }) {
     allowDrag(event);
   };
   const handleDragEnd = (event?: React.DragEvent) => {
+    clearTimeout(expandTimer.current);
+    expandTimer.current = undefined;
     // Clean up drop-ready classes
     const target = event?.currentTarget;
     const root = target?.getRootNode?.() as Document | ShadowRoot | undefined;
@@ -275,14 +278,18 @@ export function Pinned({ client }: { client: SidebarClient }) {
       }}
       onDragOver={(event) => {
         handleDragOver(event);
-        if (folder.collapsed && !expandTimer.current)
+        if (
+          event.dataTransfer.types.includes(DRAG_TYPE) &&
+          folder.collapsed &&
+          !expandTimer.current
+        )
           expandTimer.current = setTimeout(() => {
             run({
               type: 'folder.save',
               input: { ...folder, collapsed: false },
             });
             expandTimer.current = undefined;
-          }, 650);
+          }, 800);
       }}
       onDragLeave={() => {
         clearTimeout(expandTimer.current);

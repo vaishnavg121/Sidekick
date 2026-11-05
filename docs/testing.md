@@ -1,5 +1,7 @@
 # Validation and acceptance ledger
 
+Historical v0.2.0 record. See [current v0.3.0 results](final-polish-results.md) and [Appearance Studio](appearance.md).
+
 Release branch: `codex/master-build`, version 0.2.0 beta. Started from fetched `origin/main` `67089b4f007d745c11fb839e9e2f8ec17854a82f`. Final results are recorded below after rerunning affected checks. This is automated real-Chrome testing plus model inspection of rendered screenshots, not a claim of human manual testing.
 
 ## Repeatable checks

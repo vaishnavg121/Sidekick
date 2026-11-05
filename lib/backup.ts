@@ -53,6 +53,24 @@ export function mergeBackup(current: Metadata, backup: Backup): Metadata {
     library = current.library ?? emptyLibrary();
   return {
     ...current,
+    appearance:
+      current.appearance || incoming.appearance
+        ? {
+            ...current.appearance,
+            workspaces: {
+              ...current.appearance?.workspaces,
+              ...Object.fromEntries(
+                incoming.workspaces
+                  .map((w) => [
+                    workspaceId(w.id),
+                    incoming.appearance?.workspaces?.[w.id] ??
+                      incoming.appearance?.global,
+                  ])
+                  .filter(([, a]) => a),
+              ),
+            },
+          }
+        : undefined,
     workspaces: [
       ...current.workspaces,
       ...incoming.workspaces.map((w) => ({

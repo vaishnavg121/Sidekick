@@ -112,7 +112,7 @@ describe('AiService - per-tab classification', () => {
     expect(gmail?.confidence).toBeGreaterThan(0.9);
   });
 
-  it('falls back to Other category for unknown classifications', async () => {
+  it('rejects missing classifications without inventing a category', async () => {
     const fetchMock = vi.fn().mockImplementation(async () => ({
       ok: true,
       json: async () => ({ model: 'typesafe-ai/jev', answers: {} }),
@@ -555,7 +555,7 @@ describe('AiService - semantic grouping', () => {
         answers: {
           topic_1: makeChoiceAnswer('none', 0.9),
           topic_2: makeChoiceAnswer('Other', 0.9),
-          topic_3: makeChoiceAnswer('Development', 0.9),
+          topic_3: makeChoiceAnswer('Documentation', 0.9),
         },
       }),
     }));
@@ -579,7 +579,7 @@ describe('AiService - semantic grouping', () => {
         answers: {
           topic_1: makeChoiceAnswer('TypeScript development', 0.9),
           topic_2: makeChoiceAnswer('Entertainment', 0.9),
-          topic_3: makeChoiceAnswer('Communication', 0.9),
+          topic_3: makeChoiceAnswer('Email', 0.9),
         },
       }),
     }));
@@ -683,7 +683,13 @@ describe('AiService - safe cleanup', () => {
 
     const fetchMock = vi.fn().mockImplementation(async () => ({
       ok: true,
-      json: async () => ({ model: 'typesafe-ai/jev', answers: {} }),
+      json: async () => ({
+        model: 'typesafe-ai/jev',
+        answers: {
+          cleanup_1: makeChoiceAnswer('keep', 0.9),
+          cleanup_2: makeChoiceAnswer('keep', 0.9),
+        },
+      }),
     }));
     vi.stubGlobal('fetch', fetchMock);
 
@@ -739,10 +745,9 @@ describe('AiService - safe cleanup', () => {
 
     const service = new AiService();
     service.setGatewayKey('test-key');
-    const results: CleanupSuggestion[] = await service.suggestCleanup(tabs);
-
-    // Invalid choice should be ignored
-    expect(results).toHaveLength(0);
+    await expect(service.suggestCleanup(tabs)).rejects.toThrow(
+      'invalid cleanup',
+    );
   });
 });
 
@@ -801,8 +806,6 @@ describe('AiService - cache invalidation', () => {
         model: 'typesafe-ai/jev',
         answers: {
           classify_1: makeChoiceAnswer('Development', 0.9),
-          classify_2: makeChoiceAnswer('Entertainment', 0.8),
-          classify_3: makeChoiceAnswer('Communication', 0.8),
         },
       }),
     }));
@@ -830,8 +833,6 @@ describe('AiService - cache invalidation', () => {
         model: 'typesafe-ai/jev',
         answers: {
           classify_1: makeChoiceAnswer('Development', 0.9),
-          classify_2: makeChoiceAnswer('Entertainment', 0.8),
-          classify_3: makeChoiceAnswer('Communication', 0.8),
         },
       }),
     }));
@@ -1004,8 +1005,6 @@ describe('AiService - input sanitization and security', () => {
             model: 'typesafe-ai/jev',
             answers: {
               classify_1: makeChoiceAnswer('Development', 0.9),
-              classify_2: makeChoiceAnswer('Entertainment', 0.8),
-              classify_3: makeChoiceAnswer('Communication', 0.8),
             },
           }),
         };
@@ -1044,8 +1043,6 @@ describe('AiService - input sanitization and security', () => {
             model: 'typesafe-ai/jev',
             answers: {
               classify_1: makeChoiceAnswer('Development', 0.9),
-              classify_2: makeChoiceAnswer('Entertainment', 0.8),
-              classify_3: makeChoiceAnswer('Communication', 0.8),
             },
           }),
         };

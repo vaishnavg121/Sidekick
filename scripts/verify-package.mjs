@@ -13,7 +13,7 @@ assert(
 const manifest = JSON.parse(
   await readFile(resolve(extension, 'manifest.json'), 'utf8'),
 );
-assert.equal(manifest.version, '0.2.0');
+assert.equal(manifest.version, '0.3.0');
 assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.chrome_url_overrides, undefined);
 assert.deepEqual(

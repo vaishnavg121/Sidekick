@@ -22,7 +22,7 @@ import { Favorites } from './Favorites';
 import { Bookmarks } from './Bookmarks';
 import { pageControls } from '../lib/page-controls';
 import { Pinned } from './Pinned';
-import { useTheme } from './theme';
+import { useAppearance } from './theme';
 import {
   allowDrag,
   readDrag,
@@ -143,7 +143,7 @@ export function Sidebar({
 }) {
   const tabSearchRef = useRef<HTMLInputElement>(null);
   const state = useSidebar();
-  const theme = useTheme();
+  const { theme, style: appearanceStyle } = useAppearance();
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinPending, setPinPending] = useState(false);
@@ -620,7 +620,12 @@ export function Sidebar({
       data-workspace-id={state.metadata?.activeWorkspaceId}
       data-workspace-pending={state.workspacePending ? 'true' : undefined}
       aria-busy={!!state.workspacePending}
-      style={{ '--sidebar-width': `${preferences.width}px` } as CSSProperties}
+      style={
+        {
+          ...appearanceStyle,
+          '--sidebar-width': `${preferences.width}px`,
+        } as CSSProperties
+      }
     >
       {!nativePanel &&
         (!embedded || preferences.mode === 'hidden') &&

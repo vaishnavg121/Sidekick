@@ -9,11 +9,11 @@ import { Navigation, ImmersiveControls } from './Navigation';
 import { Icon } from './Icon';
 import { Sidebar } from './Sidebar';
 import { Pinned } from './Pinned';
-import { useTheme } from './theme';
+import { useAppearance } from './theme';
 
 export function NewTab() {
   const state = useSidebar();
-  const theme = useTheme();
+  const { theme, style: appearanceStyle } = useAppearance();
   const [bookmarks, setBookmarks] = useState(false);
   const [client] = useState(
     () =>
@@ -45,6 +45,7 @@ export function NewTab() {
       data-theme={theme}
       style={
         {
+          ...appearanceStyle,
           '--sidebar-width': `${(state.metadata?.preferences ?? DEFAULT_PREFERENCES).width}px`,
         } as React.CSSProperties
       }

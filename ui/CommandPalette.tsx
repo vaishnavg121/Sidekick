@@ -183,13 +183,14 @@ export function CommandPalette({
     onClose();
   };
 
-  if (!isOpen) return null;
-
   const groupEntries = [['Results', results]] as const;
 
   return (
     <div
       ref={overlayRef}
+      hidden={!isOpen}
+      inert={!isOpen}
+      aria-hidden={!isOpen}
       className="command-palette-overlay"
       onKeyDown={handleKeyDown}
       role="dialog"

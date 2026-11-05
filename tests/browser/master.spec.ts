@@ -1,3 +1,4 @@
+import { contrastRatio, defaultAppearance } from '../../lib/appearance';
 import {
   test,
   expect,
@@ -86,6 +87,7 @@ test.beforeEach(async ({ browserName }, info) => {
     headless: info.project.use.headless !== false,
     viewport: { width: 1280, height: 900 },
     args: [
+      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND',
       `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`,
     ],
@@ -205,7 +207,10 @@ test('Master acceptance: workspace membership, tab moves, session/worker reconci
   await page.reload();
   await expect(page.locator('.embedded .tab-row')).toHaveCount(3);
   await worker.evaluate((id) => chrome.windows.remove(id), secondWindow);
-  await page.screenshot({ path: 'test-results/master-workspaces.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-workspaces.png',
+  });
 });
 
 test('Master acceptance: Chrome New Tab unchanged and palette keyboard/action/accessibility', async () => {
@@ -227,7 +232,7 @@ test('Master acceptance: Chrome New Tab unchanged and palette keyboard/action/ac
   await input.fill('Open Settings');
   await input.press('Enter');
   await expect(
-    ui.getByRole('heading', { name: 'Sidebar settings' }),
+    ui.getByRole('heading', { name: 'Settings', exact: true }),
   ).toBeVisible();
   await ui
     .getByRole('button', { name: 'Open command palette (Alt+Shift+K)' })
@@ -273,6 +278,19 @@ test('Keyboard Chrome commands expose four assigned defaults and configurable pr
 });
 
 test('Master performance: 210 real Chrome tabs stay searchable with responsive palette rendering', async () => {
+  const appearance = defaultAppearance();
+  appearance.blur = 12;
+  appearance.transparency = 90;
+  appearance.grain = 2;
+  appearance.gradient.type = 'linear';
+  await request({ type: 'appearance.update', config: appearance });
+  await expect
+    .poll(() =>
+      page
+        .locator('.embedded .sidebar')
+        .evaluate((el) => getComputedStyle(el).backdropFilter),
+    )
+    .toContain('12px');
   const windowId = await page.evaluate(
     async () => (await chrome.windows.getCurrent()).id!,
   );
@@ -323,10 +341,36 @@ test('Master performance: 210 real Chrome tabs stay searchable with responsive p
     await input.press('Escape');
   }
   console.log('Measured real-tab search timings', JSON.stringify(measurements));
+  const perf = await context.newCDPSession(page);
+  await perf.send('Performance.enable');
+  const { metrics } = await perf.send('Performance.getMetrics');
+  console.log(
+    '210-tab renderer metrics with custom gradient/blur',
+    JSON.stringify(
+      Object.fromEntries(
+        metrics
+          .filter((m) =>
+            [
+              'JSHeapUsedSize',
+              'Nodes',
+              'Documents',
+              'LayoutCount',
+              'RecalcStyleCount',
+              'TaskDuration',
+            ].includes(m.name),
+          )
+          .map((m) => [m.name, m.value]),
+      ),
+    ),
+  );
+  await perf.detach();
   expect(
     measurements.every((m) => m.queryMs < 5000 && m.paletteMs < 2000),
   ).toBe(true);
-  await page.screenshot({ path: 'test-results/master-210-tabs.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-210-tabs.png',
+  });
 });
 
 test('Master recovery: full browser restart reconciles fresh Chrome handles with saved workspace fingerprints', async () => {
@@ -364,6 +408,7 @@ test('Master recovery: full browser restart reconciles fresh Chrome handles with
     viewport: { width: 1280, height: 900 },
     args: [
       '--restore-last-session',
+      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND',
       `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`,
     ],
@@ -390,7 +435,10 @@ test('Master recovery: full browser restart reconciles fresh Chrome handles with
   await expect(
     ui.getByRole('button', { name: 'restart-video', exact: true }),
   ).toBeVisible();
-  await page.screenshot({ path: 'test-results/master-browser-restart.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-browser-restart.png',
+  });
 });
 
 test('Master acceptance: save/restore sessions, alarm reminder, archive and previewed backup import', async () => {
@@ -409,7 +457,10 @@ test('Master acceptance: save/restore sessions, alarm reminder, archive and prev
     .getByRole('button', { name: 'Save workspace session', exact: true })
     .click();
   await expect(ui.getByLabel('Session name Morning research')).toBeVisible();
-  await page.screenshot({ path: 'test-results/master-sessions.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-sessions.png',
+  });
   const before = (await tabs()).length;
   await ui.getByRole('button', { name: 'Restore selected pages' }).click();
   await expect.poll(async () => (await tabs()).length).toBe(before);
@@ -433,7 +484,10 @@ test('Master acceptance: save/restore sessions, alarm reminder, archive and prev
   await ui.getByRole('button', { name: 'Open library', exact: true }).click();
   await ui.getByRole('button', { name: 'Snoozed', exact: true }).click();
   await expect(ui.getByText('Ready to restore', { exact: true })).toBeVisible();
-  await page.screenshot({ path: 'test-results/master-snoozed.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-snoozed.png',
+  });
   await ui.getByRole('button', { name: 'Restore snoozed page' }).click();
   await expect(
     ui.getByRole('button', { name: 'Restore snoozed page' }),
@@ -442,10 +496,16 @@ test('Master acceptance: save/restore sessions, alarm reminder, archive and prev
   await expect(
     ui.getByRole('button', { name: 'Restore archived page' }),
   ).toBeVisible();
-  await page.screenshot({ path: 'test-results/master-archive.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-archive.png',
+  });
   await ui.getByRole('button', { name: 'Restore archived page' }).click();
   await expect.poll(async () => (await tabs()).length).toBe(before);
-  await page.screenshot({ path: 'test-results/master-library.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-library.png',
+  });
   await ui.getByRole('button', { name: 'Open settings', exact: true }).click();
   const [download] = await Promise.all([
     page.waitForEvent('download'),
@@ -462,7 +522,10 @@ test('Master acceptance: save/restore sessions, alarm reminder, archive and prev
     buffer: Buffer.from('broken'),
   });
   await expect(ui.getByRole('alert')).toContainText('not valid JSON');
-  await page.screenshot({ path: 'test-results/master-error.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-error.png',
+  });
   expect((await metadata()).workspaces).toHaveLength(count);
   await ui.getByRole('button', { name: 'Dismiss error' }).click();
   await ui.getByLabel('Import Sidekick backup').setInputFiles({
@@ -478,7 +541,10 @@ test('Master acceptance: save/restore sessions, alarm reminder, archive and prev
   await expect
     .poll(async () => (await metadata()).workspaces.length)
     .toBe(count * 2);
-  await page.screenshot({ path: 'test-results/master-library.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-library.png',
+  });
   await p.close();
 });
 
@@ -639,7 +705,10 @@ test('Master acceptance: trusted AI key boundary, mocked real HTTP contract, rou
     });
   });
   expect(snapshot).not.toContain('isolated-contract-test-key');
-  await page.screenshot({ path: 'test-results/master-ai.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-ai.png',
+  });
   await p.close();
   await companion.close();
   await browserCdp.detach();
@@ -685,7 +754,10 @@ test('Visual acceptance: compact resources, nested folders, drag target, palette
   await expect(
     ui.getByRole('button', { name: 'Open pinned Documentation' }),
   ).toBeVisible();
-  await page.screenshot({ path: 'test-results/master-dark.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-dark.png',
+  });
   const data = await page.evaluateHandle(() => new DataTransfer());
   await data.evaluate(
     (d, item) =>
@@ -699,7 +771,10 @@ test('Visual acceptance: compact resources, nested folders, drag target, palette
   await ui
     .locator(`[data-folder-id="${parent}"]`)
     .dispatchEvent('dragover', { dataTransfer: data });
-  await page.screenshot({ path: 'test-results/master-drag-target.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-drag-target.png',
+  });
   await ui
     .locator(`[data-folder-id="${parent}"]`)
     .dispatchEvent('drop', { dataTransfer: data });
@@ -713,10 +788,16 @@ test('Visual acceptance: compact resources, nested folders, drag target, palette
   const bounds = await page.locator('.command-palette').boundingBox();
   expect(bounds).toBeTruthy();
   expect(Math.abs(bounds!.x + bounds!.width / 2 - 640)).toBeLessThan(2);
-  await page.screenshot({ path: 'test-results/master-palette.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-palette.png',
+  });
   await page.keyboard.press('Escape');
   await ui.getByRole('button', { name: 'Open settings', exact: true }).click();
-  await page.screenshot({ path: 'test-results/master-settings.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-settings.png',
+  });
   await ui.getByRole('button', { name: 'Back to tabs', exact: true }).click();
   const w = (await metadata()).workspaces.find((w) => w.id === workspaceId)!;
   await request({
@@ -734,10 +815,31 @@ test('Visual acceptance: compact resources, nested folders, drag target, palette
     'data-theme',
     'light',
   );
-  await page.screenshot({ path: 'test-results/master-light.png' });
+  const lightButton = page.locator('.dashboard-tools .text-button');
+  const foreground = await lightButton.evaluate(
+    (el) => getComputedStyle(el).color,
+  );
+  const foregroundHex =
+    '#' +
+    foreground
+      .match(/\d+/g)!
+      .slice(0, 3)
+      .map((v) => Number(v).toString(16).padStart(2, '0'))
+      .join('');
+  const background = await page
+    .locator('.newtab-shell')
+    .evaluate((el) => getComputedStyle(el).getPropertyValue('--sk-bg').trim());
+  expect(contrastRatio(foregroundHex, background)).toBeGreaterThanOrEqual(4.5);
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-light.png',
+  });
   await workspace('Empty workspace');
   await expect(ui.locator('.tab-row')).toHaveCount(0);
-  await page.screenshot({ path: 'test-results/master-empty.png' });
+  await page.screenshot({
+    animations: 'disabled',
+    path: 'test-results/master-empty.png',
+  });
   await live.close();
 });
 

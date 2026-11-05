@@ -40,3 +40,13 @@ Only trusted extension pages can configure keys. Snapshot settings are explicitl
 The [official Vercel contract](https://vercel.com/docs/ai-gateway/modalities/decision) maps named questions to typed answers. Choice UI shows the returned selected-option probability, not generated explanations. Scores normalize the authored six-rung rubric. Invalid/missing categories/scores fail without changing categories/hiding tabs. Routing criteria use workspace IDs; a single workspace needs no routing evaluation. Group acceptance creates native Chrome tab groups, never durable pins.
 
 Focus goals/preferences are durable per workspace; individual live hidden IDs remain per-window session state. URL fallback handles restart conservatively. Backup whitelist excludes keys and AI/session state. See [privacy](privacy.md) and [testing](testing.md).
+
+## Appearance and inference additions (0.3.0)
+
+`lib/appearance.ts` owns typed settings, seven presets, strict JSON/color/range validation, HSV conversions and generated CSS variables. `ui/AppearanceStudio.tsx` previews via scoped requestAnimationFrame updates; only Apply writes metadata. `ui/theme.ts` resolves workspace override → global preference → legacy light/dark/system. Device mode supplies the standard base while retaining custom accents/effects. Zero blur produces no filter; nonzero blur uses the standard CSS property. CSS effects remain on Sidekick surfaces, not webpage content.
+
+Optional `metadata.appearance` and `aiState.dismissedCategoriesByUrl` retain version 1 and every existing ID. Old metadata remains valid without an appearance migration/reset. Theme exports include no browsing/account state; portable backups remap overrides to imported copies. A same-path v0.2.0 upgrade fixture verifies unchanged IDs/resources/settings/Library data.
+
+`lib/ai-guard.ts` records input identity and a latest-request token per feature/window. Changed workspace, tab closure, navigation/title changes or superseding requests suppress results before Focus persistence. Gateway parsing verifies complete question maps/types/choices/probabilities/rubric bounds. Cache generations prevent an old-key request from populating a replacement key's cache. Categories may be edited before acceptance and dismissed durably by URL/category.
+
+Ordinary mocked Chrome profiles fail closed for the Gateway hostname. HTTP interception is explicitly acknowledged before use. The interruption test uses Chrome's ServiceWorker.stopWorker and observes its stopped event; a worker-local post-restart fetch stub separately verifies key rehydration/UI recovery. These controlled tests do not claim live inference. The opt-in live runner's post-authentication stages remain unverified after the actual first-request authorization rejection.
