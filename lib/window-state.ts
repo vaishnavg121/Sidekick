@@ -2,6 +2,8 @@ import type { StorageArea } from './repository';
 
 export interface WindowUiState {
   query: string;
+  focusHidden?: Record<string, number[]>;
+  groups?: { id: number; title: string }[];
   nativePanelOpen: boolean;
   immersive: boolean;
   restoreState?: 'normal' | 'maximized';

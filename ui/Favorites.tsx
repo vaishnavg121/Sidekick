@@ -25,6 +25,19 @@ export function Favorites({ client }: { client: SidebarClient }) {
     <section
       className="favorites-view resources-compact"
       aria-label="Workspace favorites"
+      onDragOver={allowDrag}
+      onDrop={(event) => {
+        const item = readDrag(event);
+        if (item?.kind === 'tab') {
+          event.preventDefault();
+          event.stopPropagation();
+          run({
+            type: 'resource.current',
+            kind: 'favorite',
+            tabId: Number(item.id),
+          });
+        }
+      }}
     >
       <div className="section-label">
         FAVORITES
@@ -190,6 +203,18 @@ export function Favorites({ client }: { client: SidebarClient }) {
                   }
                 >
                   Remove favorite
+                </button>
+                <button
+                  role="menuitem"
+                  onClick={() =>
+                    run({
+                      type: 'archive.resource',
+                      kind: 'favorite',
+                      id: entry.id,
+                    })
+                  }
+                >
+                  Archive favorite
                 </button>
                 <button role="menuitem" onClick={() => setMenu(undefined)}>
                   Close menu

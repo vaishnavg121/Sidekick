@@ -41,7 +41,11 @@ export class SidebarClient {
         this.retryDelay = 500;
         this.connection(true);
         if (event.type === 'focus') {
-          if (event.address) focusAddress();
+          if (event.uiAction)
+            pageControls.dispatchEvent(new Event(event.uiAction));
+          else if (event.openCommandPalette)
+            pageControls.dispatchEvent(new Event('open-command-palette'));
+          else if (event.address) focusAddress();
           else pageControls.dispatchEvent(new Event('reveal'));
           return;
         }

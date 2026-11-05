@@ -115,9 +115,9 @@ test.beforeAll(async ({ browserName }, testInfo) => {
   extensionId = new URL(worker.url()).host;
 });
 
-test('New Tab replaces Chrome home and manages workspace shortcuts without changing bookmarks', async () => {
+test('Explicit dashboard manages workspace shortcuts and preserves Chrome home and manages workspace shortcuts without changing bookmarks', async () => {
   const page = await context.newPage();
-  await page.goto('chrome://newtab/');
+  await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
   const dashboard = page.locator('.dashboard');
   await expect(
     dashboard.getByRole('heading', { name: 'Make room for what matters.' }),
@@ -126,7 +126,7 @@ test('New Tab replaces Chrome home and manages workspace shortcuts without chang
     await worker.evaluate(
       () => chrome.runtime.getManifest().chrome_url_overrides?.newtab,
     ),
-  ).toBe('newtab.html');
+  ).toBeUndefined();
   await expect(page.locator('.embedded .sidebar')).toHaveCount(1);
   await expect(page.locator('sidekick-sidebar')).toHaveCount(0);
   const folder = await worker.evaluate(async () => {
@@ -213,7 +213,7 @@ test('New Tab replaces Chrome home and manages workspace shortcuts without chang
 
 test('address controls navigate, search, reject scripts, stop, reload and traverse history', async () => {
   const page = await context.newPage();
-  await page.goto('chrome://newtab/');
+  await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
   const address = page
     .locator('.dashboard')
     .getByLabel('Address or Google search', { exact: true });
@@ -264,7 +264,10 @@ test('address controls navigate, search, reject scripts, stop, reload and traver
   await expect(page).toHaveURL(`${origin}/second`);
   await inspectOverlay(page);
   await ui.getByRole('button', { name: 'Open Sidekick', exact: true }).click();
-  await ui.getByRole('button', { name: 'Reload page', exact: true }).click();
+  await Promise.all([
+    page.waitForEvent('domcontentloaded'),
+    ui.getByRole('button', { name: 'Reload page', exact: true }).click(),
+  ]);
   await page.waitForLoadState();
   await expect(page).toHaveURL(`${origin}/second`);
   await page.goto(`${origin}/very-slow`, { waitUntil: 'commit' });
@@ -317,7 +320,7 @@ test('Immersive restores fullscreen windows, keeps native/hover access, and surv
     windowId,
   );
   const control = await context.newPage();
-  await control.goto(`chrome-extension://${extensionId}/newtab.html`);
+  await control.goto(`chrome-extension://${extensionId}/dashboard.html`);
   await page.bringToFront();
   await inspectOverlay(page);
   const ui = page.locator('sidekick=.sidekick-root');
@@ -652,10 +655,10 @@ test('tracks title changes, tab movement, window boundaries and workspace select
   await expect(native.getByLabel('Workspace', { exact: true })).toHaveValue(
     data,
   );
-  // Selection only changes metadata in this milestone.
+  // An empty logical workspace keeps other Chrome tabs alive but hides them.
   await expect(
     native.getByRole('button', { name: 'Event stream', exact: true }),
-  ).toBeVisible();
+  ).toHaveCount(0);
   await worker.evaluate(async (id) => {
     await chrome.windows.remove(id);
   }, windowId);
@@ -818,7 +821,7 @@ test('loads MV3; hover, tabs, navigation, persistence, native fallback and worke
   await cdp.detach();
   if (!(await sidebar.isVisible())) await strip.click();
   await expect(
-    ui.getByText('All tabs · this window', { exact: true }),
+    ui.getByText('Tabs / this workspace', { exact: true }),
   ).toBeVisible({ timeout: 20000 });
   await ui.getByRole('button', { name: 'Open settings' }).click();
   await expect(ui.getByLabel('Display mode')).toHaveValue('hover');
@@ -916,7 +919,7 @@ test('Pin opens the real native panel and suppresses the webpage overlay', async
     'native shared search',
   );
   const other = await context.newPage();
-  await other.goto('chrome://newtab/');
+  await other.goto(`chrome-extension://${extensionId}/dashboard.html`);
   await expect(other.locator('sidekick-sidebar')).toHaveCount(0);
   await expect
     .poll(() =>
@@ -958,7 +961,7 @@ test('Pin opens the real native panel and suppresses the webpage overlay', async
   await expect
     .poll(() =>
       native.evaluate(
-        `document.querySelector('footer')?.textContent.includes('All tabs')`,
+        `document.querySelector('footer')?.textContent.includes('Tabs /')`,
       ),
     )
     .toBe(true);
@@ -1081,7 +1084,7 @@ test('saved pinned mode waits for a gesture; hidden mode retains its edge activa
   const control = await context.newPage();
   await control.goto(`chrome-extension://${extensionId}/sidepanel.html`);
   await expect(
-    control.getByText('All tabs · this window', { exact: true }),
+    control.getByText('Tabs / this workspace', { exact: true }),
   ).toBeVisible();
   await control.evaluate(async () => {
     const key = 'sidekick.metadata.v1';

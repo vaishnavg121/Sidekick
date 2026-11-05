@@ -9,7 +9,6 @@ import {
 import { Icon } from './Icon';
 import {
   searchCommandPalette,
-  groupResults,
   type CommandPaletteResult,
   type CommandPaletteAction,
 } from '../lib/command-palette';
@@ -112,12 +111,13 @@ export function CommandPalette({
     });
   }, [query, searchIndex, isImmersive, hasActiveTab]);
 
-  const groups = useMemo(() => groupResults(results), [results]);
-
   // Focus input when opened
   useEffect(() => {
     if (isOpen) {
-      previousActiveElement.current = document.activeElement as HTMLElement;
+      previousActiveElement.current =
+        ((inputRef.current?.getRootNode() as ShadowRoot | undefined)
+          ?.activeElement as HTMLElement) ??
+        (document.activeElement as HTMLElement);
       // Small delay to ensure render is complete
       requestAnimationFrame(() => {
         inputRef.current?.focus({ preventScroll: true });
@@ -127,12 +127,20 @@ export function CommandPalette({
       previousActiveElement.current.focus({ preventScroll: true });
       previousActiveElement.current = null;
     }
+    return () => previousActiveElement.current?.focus({ preventScroll: true });
   }, [isOpen]);
 
+  useEffect(() => {
+    if (isOpen)
+      overlayRef.current
+        ?.querySelector(`#palette-${selectedIndex}`)
+        ?.scrollIntoView({ block: 'nearest' });
+  }, [isOpen, selectedIndex]);
   // Handle keyboard navigation
   const handleKeyDown = useCallback(
     (e: KeyboardEvent<HTMLDivElement>) => {
-      const maxIndex = results.length - 1;
+      e.stopPropagation();
+      const maxIndex = Math.max(0, results.length - 1);
 
       switch (e.key) {
         case 'Escape':
@@ -155,7 +163,8 @@ export function CommandPalette({
           }
           break;
         case 'Tab':
-          // Allow default tab behavior for accessibility
+          e.preventDefault();
+          inputRef.current?.focus();
           break;
         default:
           break;
@@ -176,7 +185,7 @@ export function CommandPalette({
 
   if (!isOpen) return null;
 
-  const groupEntries = Array.from(groups.entries());
+  const groupEntries = [['Results', results]] as const;
 
   return (
     <div
@@ -197,6 +206,13 @@ export function CommandPalette({
             onChange={handleInputChange}
             placeholder="Search tabs, workspaces, favorites, bookmarks, or type a URL…"
             aria-label="Command palette search"
+            role="combobox"
+            aria-expanded="true"
+            aria-autocomplete="list"
+            aria-controls="sidekick-palette-results"
+            aria-activedescendant={
+              results[selectedIndex] ? `palette-${selectedIndex}` : undefined
+            }
             autoComplete="off"
             spellCheck={false}
             maxLength={500}
@@ -208,7 +224,7 @@ export function CommandPalette({
           <div className="command-palette-empty">
             <Icon name="search" size={24} />
             <p>
-              No results for <strong>{escapeHtml(query)}</strong>
+              No results for <strong>{query}</strong>
             </p>
             <span>Try a different search or enter a URL</span>
           </div>
@@ -225,13 +241,19 @@ export function CommandPalette({
         {groupEntries.map(([groupName, groupResults]) => (
           <div key={groupName} className="command-palette-group">
             <div className="command-palette-group-label">{groupName}</div>
-            <ul className="command-palette-list" role="listbox">
+            <ul
+              className="command-palette-list"
+              role="listbox"
+              id="sidekick-palette-results"
+              aria-label="Command results"
+            >
               {groupResults.map((result) => {
                 const globalIndex = results.indexOf(result);
                 const isSelected = globalIndex === selectedIndex;
                 return (
                   <li
                     key={result.id}
+                    id={`palette-${globalIndex}`}
                     className={`command-palette-item ${isSelected ? 'selected' : ''}`}
                     role="option"
                     aria-selected={isSelected}
@@ -260,11 +282,11 @@ export function CommandPalette({
                     )}
                     <div className="command-palette-content">
                       <span className="command-palette-title">
-                        {escapeHtml(result.title)}
+                        {result.title}
                       </span>
                       {result.description && (
                         <span className="command-palette-description">
-                          {escapeHtml(result.description)}
+                          {result.description}
                         </span>
                       )}
                     </div>
@@ -295,13 +317,4 @@ export function CommandPalette({
       </div>
     </div>
   );
-}
-
-function escapeHtml(text: string): string {
-  return text
-    .replace(/&/g, '&')
-    .replace(/</g, '<')
-    .replace(/>/g, '>')
-    .replace(/"/g, '"')
-    .replace(/'/g, '&#039;');
 }

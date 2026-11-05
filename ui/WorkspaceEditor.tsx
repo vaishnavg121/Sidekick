@@ -91,6 +91,25 @@ export function WorkspaceEditor({
           Cancel
         </button>
       </div>
+      {workspace && (
+        <button
+          className="text-button danger"
+          type="button"
+          disabled={pending}
+          onClick={() => {
+            if (
+              window.confirm(
+                'Delete this workspace? It must have no live tabs or saved resources.',
+              )
+            )
+              void run({ type: 'workspace.delete', id: workspace.id })
+                .then(done)
+                .catch(() => undefined);
+          }}
+        >
+          Delete empty workspace
+        </button>
+      )}
       <p className="field-note">
         This label does not switch accounts or isolate cookies.
       </p>

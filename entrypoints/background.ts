@@ -1,3 +1,7 @@
+import {
+  ProductivityService,
+  isProductivityCommand,
+} from '../lib/productivity';
 import { MetadataRepository } from '../lib/repository';
 import {
   isCommand,
@@ -6,15 +10,19 @@ import {
   type Reply,
   type ServerEvent,
 } from '../lib/protocol';
-import { toTabItem, type TabItem } from '../lib/tabs';
 import { WindowStateRepository } from '../lib/window-state';
 import { PanelService } from '../lib/panel-service';
 import { ImmersiveController } from '../lib/immersive';
-import { NavigationService, safeUrl } from '../lib/navigation';
+import {
+  NavigationService,
+  safeUrl,
+  resolveAddress as safeUrlForNavigation,
+} from '../lib/navigation';
 import { readBookmarks } from '../lib/bookmarks';
 import { isRestrictedUrl } from '../lib/tabs';
 import { ResourceService } from '../lib/resource-service';
 import { aiService } from '../lib/ai-service';
+import { WorkspaceEngine } from '../lib/workspaces';
 import type { AiSettings } from '../lib/models';
 
 export default defineBackground(() => {
@@ -28,7 +36,13 @@ export default defineBackground(() => {
     void refresh();
   });
   const navigation = new NavigationService();
-  const resources = new ResourceService(repository);
+  const workspaceEngine = new WorkspaceEngine(
+    repository,
+    chrome.storage.session,
+    windows,
+  );
+  const resources = new ResourceService(repository, workspaceEngine);
+  const productivity = new ProductivityService(repository, workspaceEngine);
   const panels = new PanelService(
     {
       open: (options) => chrome.sidePanel.open(options),
@@ -95,7 +109,14 @@ export default defineBackground(() => {
       while (dirty) {
         dirty = false;
         await ready;
-        const metadata = await repository.get();
+        const storedMetadata = await repository.get();
+        const { aiSettings: _legacySettings, ...metadata } = storedMetadata;
+        void _legacySettings;
+        const snapshots = new Map<
+          number,
+          Promise<Awaited<ReturnType<typeof workspaceEngine.snapshot>>>
+        >();
+        const aiSettings = await getAiSettings();
         await Promise.all(
           [...clients].map(async ([port, originalWindow]) => {
             try {
@@ -104,18 +125,34 @@ export default defineBackground(() => {
                   ? (await chrome.tabs.get(port.sender.tab.id)).windowId
                   : originalWindow;
               clients.set(port, windowId);
-              const tabs = (await chrome.tabs.query({ windowId }))
-                .map(toTabItem)
-                .filter((t): t is TabItem => !!t);
+              let snapshot = snapshots.get(windowId);
+              if (!snapshot) {
+                snapshot = workspaceEngine.snapshot(windowId);
+                snapshots.set(windowId, snapshot);
+              }
+              const { tabs, workspaceId } = await snapshot;
               const windowState = await windows.get(windowId);
-              const aiSettings = await getAiSettings();
               if (clients.has(port))
                 send(port, {
                   type: 'snapshot',
                   tabs,
-                  metadata: { ...metadata, aiSettings },
+                  metadata: {
+                    ...metadata,
+                    activeWorkspaceId: workspaceId,
+                    aiSettings: {
+                      connected: aiSettings.connected,
+                      status: aiSettings.status,
+                      lastError: aiSettings.lastError,
+                      lastVerified: aiSettings.lastVerified,
+                    },
+                  },
                   windowId,
-                  windowState,
+                  windowState: {
+                    ...windowState,
+                    groups: (await chrome.tabGroups.query({ windowId })).map(
+                      (g) => ({ id: g.id, title: g.title || 'Tab group' }),
+                    ),
+                  },
                 });
             } catch {
               send(port, {
@@ -296,7 +333,28 @@ export default defineBackground(() => {
           )
             throw new Error('Browser window is unavailable.');
           const c = request.command;
+          if (isProductivityCommand(c as unknown as Record<string, unknown>)) {
+            const result = await productivity.handle(
+              c as import('../lib/productivity').ProductivityCommand,
+              windowId,
+            );
+            respond({ ok: true, ...result });
+            void refresh();
+            return;
+          }
           switch (c.type) {
+            case 'dashboard.open':
+              await chrome.tabs.create({
+                windowId,
+                url: chrome.runtime.getURL('dashboard.html'),
+              });
+              break;
+            case 'settings.open':
+              await chrome.runtime.openOptionsPage();
+              break;
+            case 'shortcuts.read':
+              respond({ ok: true, shortcuts: await chrome.commands.getAll() });
+              return;
             case 'resource.save':
             case 'resource.current':
             case 'resource.open':
@@ -309,6 +367,14 @@ export default defineBackground(() => {
             case 'folder.reorder':
             case 'folder.move':
               await resources.handle(c, windowId);
+              if (c.type === 'workspace.save') {
+                const updated = await repository.get();
+                await workspaceEngine.select(
+                  windowId,
+                  c.input.id ??
+                    updated.workspaces[updated.workspaces.length - 1]!.id,
+                );
+              }
               break;
             case 'immersive.enter':
               await immersive.enter(windowId);
@@ -316,12 +382,26 @@ export default defineBackground(() => {
             case 'immersive.exit':
               await immersive.exit(windowId);
               break;
-            case 'navigation.go':
-              await navigation.navigate(windowId, c.input, c.newTab);
+            case 'navigation.go': {
+              const snapshot = await workspaceEngine.snapshot(windowId);
+              if (c.newTab || !snapshot.tabs.some((t) => t.active))
+                await workspaceEngine.create(
+                  windowId,
+                  safeUrlForNavigation(c.input),
+                );
+              else await navigation.navigate(windowId, c.input, false);
               break;
-            case 'navigation.action':
+            }
+            case 'navigation.action': {
+              if (
+                !(await workspaceEngine.snapshot(windowId)).tabs.some(
+                  (t) => t.active,
+                )
+              )
+                throw Error('No active tab in this workspace.');
               await navigation.action(windowId, c.action);
               break;
+            }
             case 'bookmarks.read':
               respond({ ok: true, bookmarks: await readBookmarks(c.query) });
               return;
@@ -353,16 +433,12 @@ export default defineBackground(() => {
               break;
             }
             case 'tab.create':
-              await chrome.tabs.create({ windowId });
+              await workspaceEngine.create(windowId);
               break;
             case 'tab.move': {
-              const tab = await chrome.tabs.get(c.tabId);
-              if (!tab || tab.windowId !== c.windowId)
-                throw new Error('Tab not found in the specified window.');
-              await chrome.tabs.move(c.tabId, { index: c.index });
-              if (c.workspaceId) {
-                await windows.setActiveWorkspaceId(c.windowId, c.workspaceId);
-              }
+              if (c.windowId !== windowId)
+                throw Error('Tab moved to another window.');
+              await workspaceEngine.reorder(c.tabId, windowId, c.index);
               break;
             }
             case 'preferences.update':
@@ -383,271 +459,316 @@ export default defineBackground(() => {
               break;
             case 'panel.pin':
               break;
+            case 'workspace.delete':
+              await workspaceEngine.deleteWorkspace(c.id);
+              break;
             case 'workspace.select':
-              await repository.selectWorkspace(c.id);
+              await workspaceEngine.select(windowId, c.id);
               break;
             case 'ai.settings.update': {
-              const patch = c.patch;
-              if (patch.gatewayKey !== undefined) {
-                if (patch.gatewayKey === '') {
+              if (
+                !sender.url?.startsWith(chrome.runtime.getURL('')) ||
+                !['options.html', 'sidepanel.html', 'dashboard.html'].some(
+                  (path) => sender.url === chrome.runtime.getURL(path),
+                )
+              )
+                throw Error(
+                  'Open trusted Sidekick settings to configure the Gateway key.',
+                );
+              const key = c.patch.gatewayKey?.trim() ?? '';
+              if (!key) {
+                await setAiSettings({
+                  gatewayKey: undefined,
+                  connected: false,
+                  status: 'disconnected',
+                  lastError: undefined,
+                });
+                aiService.setGatewayKey(undefined);
+              } else {
+                const result = await verifyAiKey(key);
+                if (!result.ok) {
                   await setAiSettings({
                     gatewayKey: undefined,
                     connected: false,
-                    status: 'disconnected',
+                    status: 'error',
+                    lastError: result.error,
                   });
                   aiService.setGatewayKey(undefined);
-                } else {
-                  await setAiSettings({ status: 'connecting' });
-                  const verification = await verifyAiKey(patch.gatewayKey);
-                  if (verification.ok) {
-                    await setAiSettings({
-                      gatewayKey: patch.gatewayKey,
-                      connected: true,
-                      status: 'connected',
-                      lastError: undefined,
-                      lastVerified: new Date().toISOString(),
-                    });
-                    aiService.setGatewayKey(patch.gatewayKey);
-                  } else {
-                    await setAiSettings({
-                      gatewayKey: patch.gatewayKey,
-                      connected: false,
-                      status: 'error',
-                      lastError: verification.error,
-                    });
-                  }
+                  throw Error(result.error ?? 'Gateway verification failed.');
                 }
-              } else {
-                await setAiSettings(patch);
-              }
-              // Send updated settings back to client via refresh
-              break;
-            }
-            case 'ai.classify': {
-              const metadata = await repository.get();
-              const existingClassifications =
-                metadata.aiState?.tabClassifications ?? {};
-              const tabs = (await chrome.tabs.query({ windowId }))
-                .map(toTabItem)
-                .filter((t): t is TabItem => !!t);
-              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              const classifications = await aiService.classifyTabs(
-                targetTabs,
-                undefined,
-                existingClassifications,
-              );
-              // Send results back to client
-              for (const port of clients.keys()) {
-                if (clients.get(port) === windowId) {
-                  send(port, {
-                    type: 'ai.classify.result',
-                    classifications,
-                  } as ServerEvent);
-                }
+                await setAiSettings({
+                  gatewayKey: key,
+                  connected: true,
+                  status: 'connected',
+                  lastError: undefined,
+                  lastVerified: new Date().toISOString(),
+                });
+                aiService.setGatewayKey(key);
               }
               break;
             }
-            case 'ai.route': {
-              const metadata = await repository.get();
-              const tabs = (await chrome.tabs.query({ windowId }))
-                .map(toTabItem)
-                .filter((t): t is TabItem => !!t);
-              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              const recommendations = await aiService.routeTabs(
-                targetTabs,
-                metadata.workspaces,
-              );
-              for (const port of clients.keys()) {
-                if (clients.get(port) === windowId) {
-                  send(port, {
-                    type: 'ai.route.result',
-                    recommendations,
-                  } as ServerEvent);
-                }
-              }
-              break;
-            }
-            case 'ai.group': {
-              const tabs = (await chrome.tabs.query({ windowId }))
-                .map(toTabItem)
-                .filter((t): t is TabItem => !!t);
-              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              const groups = await aiService.groupTabs(targetTabs);
-              for (const port of clients.keys()) {
-                if (clients.get(port) === windowId) {
-                  send(port, {
-                    type: 'ai.group.result',
-                    groups,
-                  } as ServerEvent);
-                }
-              }
-              break;
-            }
-            case 'ai.focus': {
-              const tabs = (await chrome.tabs.query({ windowId }))
-                .map(toTabItem)
-                .filter((t): t is TabItem => !!t);
-              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              const relevance = await aiService.scoreFocus(targetTabs, c.goal);
-              for (const port of clients.keys()) {
-                if (clients.get(port) === windowId) {
-                  send(port, {
-                    type: 'ai.focus.result',
-                    relevance,
-                  } as ServerEvent);
-                }
-              }
-              break;
-            }
+            case 'ai.classify':
+            case 'ai.route':
+            case 'ai.group':
+            case 'ai.focus':
             case 'ai.cleanup': {
-              const tabs = (await chrome.tabs.query({ windowId }))
-                .map(toTabItem)
-                .filter((t): t is TabItem => !!t);
-              const targetTabs = tabs.filter((t) => c.tabIds.includes(t.id));
-              const suggestions = await aiService.suggestCleanup(targetTabs);
-              for (const port of clients.keys()) {
-                if (clients.get(port) === windowId) {
-                  send(port, {
-                    type: 'ai.cleanup.result',
-                    suggestions,
-                  } as ServerEvent);
+              const settings = await getAiSettings();
+              aiService.setGatewayKey(settings.gatewayKey);
+              const { tabs, workspaceId } =
+                await workspaceEngine.snapshot(windowId);
+              if (c.tabIds.some((id) => !tabs.some((t) => t.id === id)))
+                throw Error('Selected tabs are no longer in this workspace.');
+              const target = tabs.filter((t) => c.tabIds.includes(t.id));
+              const m = await repository.get();
+              let event: ServerEvent;
+              if (c.type === 'ai.classify') {
+                const accepted: Record<
+                  number,
+                  import('../lib/models').TabClassification
+                > = {};
+                for (const tab of target) {
+                  const saved = m.aiState?.acceptedByUrl?.[tab.url];
+                  if (saved) accepted[tab.id] = { ...saved, tabId: tab.id };
                 }
+                event = {
+                  type: 'ai.classify.result',
+                  classifications: await aiService.classifyTabs(
+                    target,
+                    undefined,
+                    accepted,
+                  ),
+                };
+              } else if (c.type === 'ai.route') {
+                const recommendations = await aiService.routeTabs(
+                  target,
+                  m.workspaces,
+                );
+                event = {
+                  type: 'ai.route.result',
+                  recommendations: recommendations.filter(
+                    (r) =>
+                      !m.aiState?.rejectedByUrl?.[
+                        target.find((t) => t.id === r.tabId)!.url
+                      ]?.includes(r.workspaceId),
+                  ),
+                };
+              } else if (c.type === 'ai.group')
+                event = {
+                  type: 'ai.group.result',
+                  groups: await aiService.groupTabs(target),
+                };
+              else if (c.type === 'ai.cleanup')
+                event = {
+                  type: 'ai.cleanup.result',
+                  suggestions: await aiService.suggestCleanup(target),
+                };
+              else {
+                const relevance = await aiService.scoreFocus(target, c.goal);
+                const hiddenIds = relevance
+                  .filter((r) => r.score < 0.5)
+                  .map((r) => r.tabId);
+                const windowState = await windows.get(windowId);
+                await windows.update(windowId, {
+                  focusHidden: {
+                    ...windowState.focusHidden,
+                    [workspaceId]: hiddenIds,
+                  },
+                });
+                const hiddenUrls = target
+                  .filter((t) =>
+                    relevance.some((r) => r.tabId === t.id && r.score < 0.5),
+                  )
+                  .filter((t) =>
+                    target
+                      .filter((other) => other.url === t.url)
+                      .every((other) => hiddenIds.includes(other.id)),
+                  )
+                  .map((t) => t.url);
+                await repository.updateAiState((ai) => ({
+                  ...ai,
+                  focusPreferences: {
+                    ...ai.focusPreferences,
+                    [workspaceId]: {
+                      goal: c.goal,
+                      mode: true,
+                      hiddenTabIds: [],
+                      hiddenUrls,
+                      lastUpdated: new Date().toISOString(),
+                    },
+                  },
+                }));
+                event = { type: 'ai.focus.result', relevance };
               }
+              if (
+                (await workspaceEngine.activeWorkspace(windowId)) ===
+                workspaceId
+              )
+                for (const [port, id] of clients)
+                  if (id === windowId) send(port, event);
+              break;
+            }
+            case 'focus.update': {
+              const workspaceId =
+                await workspaceEngine.activeWorkspace(windowId);
+              let durableUrls = c.hiddenUrls;
+              if (c.hiddenTabIds !== undefined) {
+                const snapshot = await workspaceEngine.snapshot(windowId);
+                if (
+                  c.hiddenTabIds.some(
+                    (id) => !snapshot.tabs.some((t) => t.id === id),
+                  )
+                )
+                  throw Error('Focus tab no longer exists in this workspace.');
+                durableUrls = snapshot.tabs
+                  .filter(
+                    (t) =>
+                      c.hiddenTabIds!.includes(t.id) &&
+                      snapshot.tabs
+                        .filter((other) => other.url === t.url)
+                        .every((other) => c.hiddenTabIds!.includes(other.id)),
+                  )
+                  .map((t) => t.url);
+                const state = await windows.get(windowId);
+                await windows.update(windowId, {
+                  focusHidden: {
+                    ...state.focusHidden,
+                    [workspaceId]: c.hiddenTabIds,
+                  },
+                });
+              }
+              await repository.updateAiState((ai) => ({
+                ...ai,
+                focusPreferences: {
+                  ...ai.focusPreferences,
+                  [workspaceId]: {
+                    goal: c.goal,
+                    mode: c.mode,
+                    hiddenTabIds: [],
+                    hiddenUrls:
+                      durableUrls ??
+                      ai.focusPreferences[workspaceId]?.hiddenUrls ??
+                      [],
+                    lastUpdated: new Date().toISOString(),
+                  },
+                },
+              }));
+              break;
+            }
+            case 'ai.route.reject': {
+              const { tabs } = await workspaceEngine.snapshot(windowId);
+              const tab = tabs.find((t) => t.id === c.tabId);
+              if (!tab) throw Error('Tab no longer exists in this workspace.');
+              await repository.updateAiState((ai) => ({
+                ...ai,
+                rejectedByUrl: {
+                  ...ai.rejectedByUrl,
+                  [tab.url]: [
+                    ...new Set([
+                      ...(ai.rejectedByUrl?.[tab.url] ?? []),
+                      c.workspaceId,
+                    ]),
+                  ],
+                },
+              }));
               break;
             }
             case 'ai.apply.classification': {
-              const { classifications } = c;
-              await repository.updateAiState((aiState) => {
-                const newClassifications = { ...aiState.tabClassifications };
-                for (const cls of classifications) {
-                  newClassifications[cls.tabId] = cls;
+              const { tabs } = await workspaceEngine.snapshot(windowId);
+              if (
+                c.classifications.some(
+                  (cls) => !tabs.some((t) => t.id === cls.tabId),
+                )
+              )
+                throw Error('Tab no longer exists in this workspace.');
+              await repository.updateAiState((ai) => {
+                const accepted = { ...ai.acceptedByUrl };
+                for (const cls of c.classifications) {
+                  const tab = tabs.find((t) => t.id === cls.tabId)!;
+                  accepted[tab.url] = {
+                    category: cls.category,
+                    confidence: cls.confidence,
+                    reasoning: cls.reasoning,
+                  };
                 }
-                return { ...aiState, tabClassifications: newClassifications };
+                return { ...ai, acceptedByUrl: accepted };
               });
               break;
             }
             case 'ai.apply.routing': {
-              const { recommendations } = c;
-              const metadata = await repository.get();
-              // Reject tracking
-              await repository.updateAiState((aiState) => {
-                const rejectedRecs = { ...aiState.rejectedRecommendations };
-                for (const rec of recommendations) {
-                  if (!rejectedRecs[rec.tabId]) rejectedRecs[rec.tabId] = [];
-                }
-                return { ...aiState, rejectedRecommendations: rejectedRecs };
-              });
-              // For each recommendation, move the tab to the workspace
-              for (const rec of recommendations) {
-                const tab = await chrome.tabs.get(rec.tabId).catch(() => null);
-                if (!tab) continue;
-                // Check if this recommendation was rejected before
-                const rejected =
-                  metadata.aiState?.rejectedRecommendations?.[rec.tabId] ?? [];
-                if (rejected.includes(rec.workspaceId)) continue;
-                // Use resource.current to save as pinned in the target workspace
-                await resources.handle(
-                  {
-                    type: 'resource.current',
-                    kind: 'pinned',
-                    tabId: rec.tabId,
-                    folderId: null,
-                  },
-                  windowId,
-                );
-                // Then move it to the target workspace
-                await resources.handle(
-                  {
-                    type: 'resource.move',
-                    kind: 'pinned',
-                    id: String(rec.tabId),
-                    workspaceId: rec.workspaceId,
-                    folderId: null,
-                  },
-                  windowId,
-                );
-              }
+              // Validate the entire batch before the first membership change.
+              const { tabs } = await workspaceEngine.snapshot(windowId);
+              const m = await repository.get();
+              if (
+                c.recommendations.some(
+                  (r) =>
+                    !tabs.some((t) => t.id === r.tabId) ||
+                    !m.workspaces.some((w) => w.id === r.workspaceId),
+                )
+              )
+                throw Error('Routing destination or tab no longer exists.');
+              for (const r of c.recommendations)
+                await workspaceEngine.move(r.tabId, windowId, r.workspaceId);
               break;
             }
             case 'ai.apply.groups': {
-              const { groups } = c;
-              const metadata = await repository.get();
-              for (const group of groups) {
-                // Create folder
-                const folderResult = await repository.authorFolder({
-                  workspaceId: metadata.activeWorkspaceId,
-                  parentId: null,
-                  name: group.topic,
+              const { tabs } = await workspaceEngine.snapshot(windowId);
+              if (
+                c.groups.some((g) =>
+                  g.tabs.some((id) => !tabs.some((t) => t.id === id)),
+                )
+              )
+                throw Error('Group contains tabs outside this workspace.');
+              for (const group of c.groups) {
+                const groupId = await chrome.tabs.group({
+                  tabIds: group.tabs as [number, ...number[]],
                 });
-                const folderId = folderResult.folders.find(
-                  (f) =>
-                    f.name === group.topic &&
-                    f.workspaceId === metadata.activeWorkspaceId,
-                )?.id;
-                if (!folderId) continue;
-                // Move each tab in the group to the folder as pinned entries
-                for (const tabId of group.tabs) {
-                  try {
-                    await resources.handle(
-                      {
-                        type: 'resource.current',
-                        kind: 'pinned',
-                        tabId,
-                        folderId,
-                      },
-                      windowId,
-                    );
-                  } catch {
-                    // Tab might have been closed, skip
-                  }
-                }
+                await chrome.tabGroups.update(groupId, { title: group.topic });
               }
               break;
             }
             case 'ai.apply.focus': {
-              const { relevance } = c;
-              const metadata = await repository.get();
-              const workspaceId = metadata.activeWorkspaceId;
-              const hiddenTabIds = relevance
-                .filter((r) => r.score < 0.5)
-                .map((r) => r.tabId);
-              await repository.updateAiState((aiState) => {
-                const focusPref = aiState.focusPreferences[workspaceId] ?? {
-                  goal: '',
-                  mode: false,
-                  hiddenTabIds: [],
-                  lastUpdated: new Date().toISOString(),
-                };
-                focusPref.hiddenTabIds = hiddenTabIds;
-                focusPref.lastUpdated = new Date().toISOString();
+              const { tabs, workspaceId } =
+                await workspaceEngine.snapshot(windowId);
+              if (c.relevance.some((r) => !tabs.some((t) => t.id === r.tabId)))
+                throw Error('Focus tab no longer exists.');
+              await repository.updateAiState((ai) => {
+                const previous = ai.focusPreferences[workspaceId];
                 return {
-                  ...aiState,
+                  ...ai,
                   focusPreferences: {
-                    ...aiState.focusPreferences,
-                    [workspaceId]: focusPref,
+                    ...ai.focusPreferences,
+                    [workspaceId]: {
+                      goal: previous?.goal ?? '',
+                      mode: true,
+                      hiddenTabIds: [],
+                      hiddenUrls: tabs
+                        .filter((t) =>
+                          c.relevance.some(
+                            (r) => r.tabId === t.id && r.score < 0.5,
+                          ),
+                        )
+                        .map((t) => t.url),
+                      lastUpdated: new Date().toISOString(),
+                    },
                   },
                 };
               });
               break;
             }
             case 'ai.apply.cleanup': {
-              // Cleanup is handled client-side with confirmation
-              break;
-            }
-            case 'command-palette.open': {
-              // Command palette is handled client-side, but we can track it
-              break;
-            }
-            case 'command-palette.close': {
-              break;
-            }
-            case 'command-palette.action': {
-              // Actions are executed client-side via the sidebar client
-              // This case is for logging/analytics if needed
+              const { tabs } = await workspaceEngine.snapshot(windowId);
+              const ids = [...new Set(c.suggestions.flatMap((s) => s.tabIds))];
+              if (ids.some((id) => !tabs.some((t) => t.id === id)))
+                throw Error('Cleanup tabs changed. Review suggestions again.');
+              for (const id of ids)
+                await productivity.handle(
+                  { type: 'archive.tab', tabId: id, close: true },
+                  windowId,
+                );
               break;
             }
             case 'tab.updateWorkspace': {
-              await windows.setActiveWorkspaceId(windowId, c.workspaceId);
+              await workspaceEngine.move(c.tabId, windowId, c.workspaceId);
               break;
             }
           }
@@ -670,14 +791,30 @@ export default defineBackground(() => {
   const changed = () => {
     if (clients.size) void refresh();
   };
-  chrome.tabs.onCreated.addListener(changed);
-  chrome.tabs.onRemoved.addListener(changed);
+  chrome.alarms.onAlarm.addListener((alarm) => {
+    void productivity.due(alarm.name).then(changed).catch(report);
+  });
+  chrome.tabs.onCreated.addListener(() => {
+    void workspaceEngine.reconcile().then(changed).catch(report);
+  });
+  chrome.tabs.onRemoved.addListener(() => {
+    void workspaceEngine.reconcile().then(changed).catch(report);
+  });
   chrome.tabs.onUpdated.addListener(changed);
-  chrome.tabs.onActivated.addListener(changed);
+  chrome.tabs.onActivated.addListener((info) => {
+    void workspaceEngine
+      .activated(info.tabId, info.windowId)
+      .then(changed)
+      .catch(report);
+  });
   chrome.tabs.onMoved.addListener(changed);
-  chrome.tabs.onAttached.addListener(changed);
+  chrome.tabs.onAttached.addListener(() => {
+    void workspaceEngine.reconcile().then(changed).catch(report);
+  });
   chrome.tabs.onDetached.addListener(changed);
-  chrome.tabs.onReplaced.addListener(changed);
+  chrome.tabs.onReplaced.addListener((added, removed) => {
+    void workspaceEngine.replaced(added, removed).then(changed).catch(report);
+  });
   chrome.sidePanel.onOpened?.addListener((info) => {
     void panels.opened(info.windowId).catch(report);
   });
@@ -696,6 +833,81 @@ export default defineBackground(() => {
   });
   chrome.commands.onCommand.addListener((command, tab) => {
     if (tab?.windowId === undefined) return;
+    if (
+      [
+        'next-workspace',
+        'previous-workspace',
+        'new-tab',
+        'toggle-focus',
+        'toggle-sidebar',
+      ].includes(command)
+    ) {
+      void (async () => {
+        const windowId = tab.windowId;
+        const m = await repository.get(),
+          selected = await workspaceEngine.activeWorkspace(windowId);
+        if (command === 'next-workspace' || command === 'previous-workspace') {
+          const index = m.workspaces.findIndex((w) => w.id === selected),
+            delta = command === 'next-workspace' ? 1 : -1;
+          await workspaceEngine.select(
+            windowId,
+            m.workspaces[
+              (index + delta + m.workspaces.length) % m.workspaces.length
+            ]!.id,
+          );
+        } else if (command === 'new-tab')
+          await workspaceEngine.create(windowId);
+        else if (command === 'toggle-sidebar')
+          await panels.setMode(
+            windowId,
+            m.preferences.mode === 'hidden' ? 'hover' : 'hidden',
+          );
+        else
+          await repository.updateAiState((ai) => {
+            const p = ai.focusPreferences[selected] ?? {
+              goal: '',
+              mode: false,
+              hiddenTabIds: [],
+              hiddenUrls: [],
+              lastUpdated: new Date().toISOString(),
+            };
+            return {
+              ...ai,
+              focusPreferences: {
+                ...ai.focusPreferences,
+                [selected]: { ...p, mode: !p.mode },
+              },
+            };
+          });
+        await refresh();
+      })().catch(report);
+      return;
+    }
+    if (command === 'focus-tab-search' || command === 'organize-jev') {
+      const event: ServerEvent = {
+        type: 'focus',
+        address: false,
+        uiAction: command,
+      };
+      const ports = [...clients].filter(
+        ([port, id]) =>
+          id === tab.windowId &&
+          (panelClients.has(port) || port.sender?.tab?.id === tab.id),
+      );
+      if (ports.length) {
+        for (const [port] of ports) send(port, event);
+        return;
+      }
+      if (isRestrictedUrl(tab.url ?? '')) {
+        void panels.pin(tab.windowId).catch(report);
+        return;
+      }
+      if (tab.id !== undefined)
+        void chrome.tabs
+          .sendMessage(tab.id, { channel: 'sidekick:page', action: command })
+          .catch(report);
+      return;
+    }
     if (command === 'exit-immersive') {
       void immersive.exit(tab.windowId).catch(report);
       return;
@@ -717,7 +929,7 @@ export default defineBackground(() => {
       const dashboard = [...clients.keys()].find(
         (port) =>
           port.sender?.tab?.id === tab.id &&
-          port.sender?.url === chrome.runtime.getURL('newtab.html'),
+          port.sender?.url === chrome.runtime.getURL('dashboard.html'),
       );
       if (dashboard) {
         send(dashboard, {
@@ -751,7 +963,7 @@ export default defineBackground(() => {
     const dashboard = [...clients.keys()].find(
       (port) =>
         port.sender?.tab?.id === tab.id &&
-        port.sender?.url === chrome.runtime.getURL('newtab.html'),
+        port.sender?.url === chrome.runtime.getURL('dashboard.html'),
     );
     if (dashboard) {
       send(dashboard, { type: 'focus', address: command === 'focus-address' });
@@ -783,7 +995,14 @@ export default defineBackground(() => {
       )
       .catch(report);
     void ready
-      .then(() => repository.get())
+      .then(async () => {
+        const legacy = (await repository.get()).aiSettings;
+        if (legacy?.gatewayKey && !(await getAiSettings()).gatewayKey)
+          await setAiSettings(legacy);
+
+        await workspaceEngine.reconcile();
+        await productivity.reconcileAlarms();
+      })
       .catch((error: unknown) =>
         console.error('Sidekick initialization failed', error),
       );

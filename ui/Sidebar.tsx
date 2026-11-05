@@ -1,7 +1,10 @@
+import { TabActions } from './TabActions';
+import { LibraryView } from './LibraryView';
 import {
   useEffect,
   useMemo,
   useState,
+  useRef,
   useCallback,
   type CSSProperties,
 } from 'react';
@@ -49,12 +52,34 @@ function TabRow({
   onDragLeave: () => void;
   onDrop: (event: React.DragEvent, targetTab?: TabItem) => void;
 }) {
+  const category = useSidebar(
+    (s) => s.metadata?.aiState?.acceptedByUrl?.[tab.url]?.category,
+  );
   const safeIcon =
     tab.favicon && /^(https?:|data:image\/)/.test(tab.favicon)
       ? tab.favicon
       : undefined;
   return (
     <li
+      data-tab-id={tab.id}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        event.currentTarget
+          .querySelector<HTMLButtonElement>('.tab-actions > button')
+          ?.click();
+      }}
+      onKeyDown={(event) => {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const row = event.currentTarget;
+          const rows = Array.from(
+            row.closest('.tab-list')?.querySelectorAll('.tab-row') ?? [],
+          );
+          const index = rows.indexOf(row);
+          const next = rows[index + (event.key === 'ArrowDown' ? 1 : -1)];
+          next?.querySelector<HTMLButtonElement>('.tab-activate')?.focus();
+        }
+      }}
       className={`tab-row ${tab.active ? 'active' : ''}`}
       draggable
       onDragStart={(event) => onDragStart(event, tab)}
@@ -89,8 +114,14 @@ function TabRow({
           )}
         </span>
         <span className="truncate">{tab.title}</span>
+        {category && (
+          <span className="tab-category" title={category}>
+            {category}
+          </span>
+        )}
         {tab.active && <span className="active-dot" aria-hidden="true" />}
       </button>
+      <TabActions tab={tab} run={run} />
       <button
         className="tab-close"
         aria-label={`Close ${tab.title}`}
@@ -110,12 +141,14 @@ export function Sidebar({
   nativePanel: boolean;
   embedded?: boolean;
 }) {
+  const tabSearchRef = useRef<HTMLInputElement>(null);
   const state = useSidebar();
   const theme = useTheme();
   const [open, setOpen] = useState(false);
   const [focused, setFocused] = useState(false);
   const [pinPending, setPinPending] = useState(false);
   const [bookmarks, setBookmarks] = useState(false);
+  const [library, setLibrary] = useState(false);
   const [showAIPanel, setShowAIPanel] = useState(false);
   const [forcedReveal, setForcedReveal] = useState(false);
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
@@ -125,6 +158,14 @@ export function Sidebar({
     () =>
       new SidebarClient((event) => {
         if (event.type === 'snapshot') {
+          if (
+            event.windowState.immersive !==
+            useSidebar.getState().windowState.immersive
+          ) {
+            hover.cancel();
+            setForcedReveal(true);
+            setOpen(true);
+          }
           const mode = event.metadata.preferences.mode;
           if (
             event.windowState.nativePanelOpen ||
@@ -180,6 +221,9 @@ export function Sidebar({
   }, [client, hover, nativePanel, embedded]);
 
   const openCommandPalette = useCallback(() => {
+    hover.requestReveal();
+    setForcedReveal(true);
+    setOpen(true);
     setCommandPaletteOpen(true);
     // Fetch bookmarks for the palette
     client
@@ -192,13 +236,11 @@ export function Sidebar({
       .catch(() => {
         // Ignore bookmark fetch errors
       });
-    void client.command({ type: 'command-palette.open' });
-  }, [client]);
+  }, [client, hover]);
 
   const closeCommandPalette = useCallback(() => {
     setCommandPaletteOpen(false);
-    void client.command({ type: 'command-palette.close' });
-  }, [client]);
+  }, []);
 
   useEffect(() => {
     const reveal = () => {
@@ -217,10 +259,31 @@ export function Sidebar({
     const openPalette = () => {
       openCommandPalette();
     };
+    const searchTabs = () => {
+      reveal();
+      setLibrary(false);
+      stateSettings(false);
+      setBookmarks(false);
+      setShowAIPanel(false);
+      requestAnimationFrame(() => tabSearchRef.current?.focus());
+    };
+    const stateSettings = (value: boolean) =>
+      useSidebar.getState().setSettings(value);
+    const organize = () => {
+      reveal();
+      setLibrary(false);
+      stateSettings(false);
+      setBookmarks(false);
+      setShowAIPanel(true);
+    };
+    pageControls.addEventListener('focus-tab-search', searchTabs);
+    pageControls.addEventListener('organize-jev', organize);
     pageControls.addEventListener('address', reveal);
     pageControls.addEventListener('reveal', reveal);
     pageControls.addEventListener('open-command-palette', openPalette);
     return () => {
+      pageControls.removeEventListener('focus-tab-search', searchTabs);
+      pageControls.removeEventListener('organize-jev', organize);
       pageControls.removeEventListener('address', reveal);
       pageControls.removeEventListener('reveal', reveal);
       pageControls.removeEventListener('open-command-palette', openPalette);
@@ -349,6 +412,9 @@ export function Sidebar({
         });
         break;
       case 'open-settings':
+        setLibrary(false);
+        setShowAIPanel(false);
+        setBookmarks(false);
         state.setSettings(true);
         break;
       case 'open-bookmarks':
@@ -357,7 +423,10 @@ export function Sidebar({
         state.setSettings(false);
         break;
       case 'organize-with-jev':
-        run({ type: 'ai.classify', tabIds: state.tabs.map((t) => t.id) });
+        setLibrary(false);
+        setShowAIPanel(true);
+        setBookmarks(false);
+        state.setSettings(false);
         break;
       case 'search-web':
         if (isSearchWebPayload(payload))
@@ -368,24 +437,6 @@ export function Sidebar({
     }
     closeCommandPalette();
   };
-
-  // Command palette keyboard shortcut handler
-  useEffect(() => {
-    const handleKeyDown = (e: KeyboardEvent) => {
-      // Alt+Shift+K for command palette
-      if (e.altKey && e.shiftKey && e.key === 'K') {
-        e.preventDefault();
-        openCommandPalette();
-      }
-      // Escape closes command palette
-      if (e.key === 'Escape' && commandPaletteOpen) {
-        e.preventDefault();
-        closeCommandPalette();
-      }
-    };
-    document.addEventListener('keydown', handleKeyDown);
-    return () => document.removeEventListener('keydown', handleKeyDown);
-  }, [commandPaletteOpen, client, openCommandPalette, closeCommandPalette]);
 
   const preferences = state.metadata?.preferences ?? DEFAULT_PREFERENCES;
   const effectiveMode =
@@ -404,23 +455,28 @@ export function Sidebar({
       !pinPending &&
       !state.windowState.nativePanelOpen &&
       (effectiveMode === 'hover' || forcedReveal) &&
-      (open || focused));
+      (open || focused || forcedReveal || commandPaletteOpen));
   const pinnedUrls = new Set(
     state.metadata?.pinnedEntries
       .filter((e) => e.workspaceId === state.metadata?.activeWorkspaceId)
       .map((e) => e.url),
   );
-  const { focusMode, focusRelevance } = state.ai;
-  const relevantTabIds = focusMode
-    ? new Set(focusRelevance.filter((r) => r.score >= 0.5).map((r) => r.tabId))
-    : null;
-  let tabs = searchTabs(state.tabs, state.query).filter(
-    (tab) => !pinnedUrls.has(tab.url),
+  const focusPreference =
+    state.metadata?.aiState?.focusPreferences[state.metadata.activeWorkspaceId];
+  const focusMode = focusPreference?.mode ?? false;
+  const hiddenIds =
+    state.windowState.focusHidden?.[state.metadata?.activeWorkspaceId ?? '-'];
+  const tabs = searchTabs(state.tabs, state.query).filter(
+    (tab) =>
+      !pinnedUrls.has(tab.url) &&
+      (!focusMode ||
+        (hiddenIds
+          ? !hiddenIds.includes(tab.id)
+          : !focusPreference?.hiddenUrls?.includes(tab.url))),
   );
-  if (focusMode && relevantTabIds) {
-    tabs = tabs.filter((tab) => relevantTabIds.has(tab.id));
-  }
   const run = (command: Command) => {
+    if (command.type === 'workspace.select')
+      state.setWorkspacePending(command.id);
     state.setError(undefined);
     const pinning =
       command.type === 'panel.pin' ||
@@ -438,6 +494,7 @@ export function Sidebar({
         if (pinning) setPinPending(false);
       })
       .catch((error: unknown) => {
+        state.setWorkspacePending(undefined);
         hover.cancelReveal();
         if (pinning) {
           setPinPending(false);
@@ -502,6 +559,7 @@ export function Sidebar({
     if (!validateDragItem(item, ['tab', 'pinned'], [activeWorkspaceId])) return;
 
     event.preventDefault();
+    event.stopPropagation();
 
     if (item.kind === 'tab') {
       // Reorder tabs - use chrome.tabs.move for actual reordering
@@ -512,13 +570,15 @@ export function Sidebar({
         if (fromIndex !== -1 && toIndex !== -1 && fromIndex !== toIndex) {
           const windowId = client.currentWindowId;
           if (windowId) {
-            const moveIndex = toIndex > fromIndex ? toIndex : toIndex;
-            void client.command({
-              type: 'tab.move',
-              tabId: Number(item.id),
-              windowId,
-              index: moveIndex,
-            });
+            const moveIndex = targetTab.index;
+            void client
+              .command({
+                type: 'tab.move',
+                tabId: Number(item.id),
+                windowId,
+                index: moveIndex,
+              })
+              .catch((e: Error) => state.setError(e.message));
           }
         }
       }
@@ -557,6 +617,9 @@ export function Sidebar({
     <div
       className={`sidekick-root ${embedded ? 'embedded' : nativePanel ? 'native' : state.dockStatus.active ? 'docked' : 'overlay'}`}
       data-theme={theme}
+      data-workspace-id={state.metadata?.activeWorkspaceId}
+      data-workspace-pending={state.workspacePending ? 'true' : undefined}
+      aria-busy={!!state.workspacePending}
       style={{ '--sidebar-width': `${preferences.width}px` } as CSSProperties}
     >
       {!nativePanel &&
@@ -590,6 +653,7 @@ export function Sidebar({
                   hover.requestReveal();
                   run({ type: 'sidebar.mode', mode: 'hover' });
                 }
+                setForcedReveal(true);
                 setOpen(true);
               }
             }}
@@ -655,9 +719,13 @@ export function Sidebar({
         className={`sidebar ${visible ? 'is-visible' : ''}`}
         aria-label="Sidekick sidebar"
         inert={!visible}
-        onPointerEnter={() => hover.enter(0)}
+        onPointerEnter={() => {
+          hover.enter(0);
+          if (!commandPaletteOpen) setForcedReveal(false);
+        }}
         onPointerLeave={() => hover.leave(preferences.closeDelay)}
         onFocusCapture={() => {
+          if (!commandPaletteOpen) setForcedReveal(false);
           hover.cancel();
           setFocused(true);
         }}
@@ -751,18 +819,18 @@ export function Sidebar({
                 className="icon-button"
                 aria-label="Organize tabs with Jev"
                 title="Organize tabs with AI"
-                onClick={() =>
-                  run({
-                    type: 'ai.classify',
-                    tabIds: state.tabs.map((t) => t.id),
-                  })
-                }
+                onClick={() => {
+                  setLibrary(false);
+                  setShowAIPanel(true);
+                  setBookmarks(false);
+                  state.setSettings(false);
+                }}
                 disabled={!state.connected}
               >
                 <Icon name="sparkles" size={14} />
               </button>
             )}
-            {!nativePanel && !embedded && (
+            {
               <button
                 className="icon-button"
                 aria-label="Open command palette (Alt+Shift+K)"
@@ -772,10 +840,25 @@ export function Sidebar({
               >
                 <Icon name="search" size={14} />
               </button>
-            )}
+            }
           </div>
         </header>
-        <WorkspaceSelector run={run} client={client} />
+        {state.metadata && !state.metadata.onboardingDismissed && (
+          <div className="onboarding-card">
+            <strong>A workspace for every kind of day.</strong>
+            <p>
+              Create a workspace, add tabs, then press Alt+Shift+K to find
+              anything. Jev is optional. Tabs share this Chrome profile.
+            </p>
+            <button
+              className="text-button"
+              onClick={() => run({ type: 'onboarding.dismiss' })}
+            >
+              Got it
+            </button>
+          </div>
+        )}
+        <WorkspaceSelector run={run} client={client} tabs={state.tabs} />
         <ImmersiveControls client={client} />
         <Navigation client={client} visible={visible} />
         {!embedded &&
@@ -815,9 +898,12 @@ export function Sidebar({
             {state.windowState.notice}
           </div>
         )}
-        {state.settings ? (
+        {library ? (
+          <LibraryView client={client} />
+        ) : state.settings ? (
           <div className="scroll-area">
             <Settings
+              client={client}
               preferences={preferences}
               update={(patch) => run({ type: 'preferences.update', patch })}
               aiSettings={
@@ -837,13 +923,17 @@ export function Sidebar({
           </div>
         ) : showAIPanel ? (
           <div className="scroll-area">
-            <AISuggestionsPanel client={client} />
+            <AISuggestionsPanel
+              key={state.metadata?.activeWorkspaceId}
+              client={client}
+            />
           </div>
         ) : (
           <>
             <div className="search-box flex items-center gap-2">
               <Icon name="search" size={16} />
               <input
+                ref={tabSearchRef}
                 aria-label="Search tabs"
                 placeholder="Search your tabs…"
                 value={state.query}
@@ -884,20 +974,26 @@ export function Sidebar({
                 <div className="section-label">
                   {state.query
                     ? 'SEARCH RESULTS'
-                    : state.ai.focusMode
+                    : focusMode
                       ? 'FOCUS MODE'
                       : 'TODAY'}
                   <span className="tab-count">
                     {state.query
                       ? `${tabs.length} / ${state.tabs.length}`
-                      : state.ai.focusMode
+                      : focusMode
                         ? `${tabs.length} / ${state.tabs.length}`
                         : state.tabs.length}
                   </span>
-                  {state.ai.focusMode && (
+                  {focusMode && (
                     <button
                       className="text-button small"
-                      onClick={() => state.ai.setFocusMode(false)}
+                      onClick={() =>
+                        run({
+                          type: 'focus.update',
+                          goal: focusPreference?.goal ?? '',
+                          mode: false,
+                        })
+                      }
                     >
                       Show All
                     </button>
@@ -909,17 +1005,30 @@ export function Sidebar({
                   </div>
                 ) : tabs.length ? (
                   <ul className="tab-list">
-                    {tabs.map((tab) => (
-                      <TabRow
-                        key={tab.id}
-                        tab={tab}
-                        run={run}
-                        onDragStart={handleTabDragStart}
-                        onDragOver={handleTabDragOver}
-                        onDragEnd={handleDragEnd}
-                        onDragLeave={handleDragLeave}
-                        onDrop={handleTabDrop}
-                      />
+                    {tabs.map((tab, index) => (
+                      <li key={tab.id} className="tab-group-container">
+                        {tab.groupId !== undefined &&
+                          tab.groupId >= 0 &&
+                          tabs[index - 1]?.groupId !== tab.groupId && (
+                            <div className="live-group-label">
+                              {state.windowState.groups?.find(
+                                (g) => g.id === tab.groupId,
+                              )?.title ?? 'Chrome tab group'}
+                            </div>
+                          )}
+                        <ul>
+                          <TabRow
+                            key={tab.id}
+                            tab={tab}
+                            run={run}
+                            onDragStart={handleTabDragStart}
+                            onDragOver={handleTabDragOver}
+                            onDragEnd={handleDragEnd}
+                            onDragLeave={handleDragLeave}
+                            onDrop={handleTabDrop}
+                          />
+                        </ul>
+                      </li>
                     ))}
                   </ul>
                 ) : (
@@ -951,6 +1060,19 @@ export function Sidebar({
         <footer className="sidebar-footer flex items-center justify-between">
           <button
             className="icon-button"
+            aria-label={library ? 'Back from library' : 'Open library'}
+            aria-pressed={library}
+            onClick={() => {
+              setLibrary(!library);
+              state.setSettings(false);
+              setBookmarks(false);
+              setShowAIPanel(false);
+            }}
+          >
+            <Icon name="copy" size={17} />
+          </button>
+          <button
+            className="icon-button"
             aria-label={bookmarks ? 'Show tabs' : 'Open bookmarks'}
             aria-pressed={bookmarks}
             onClick={() => {
@@ -963,13 +1085,14 @@ export function Sidebar({
           </button>
           <span className="connection-status">
             <i className={state.connected ? 'connected' : ''} />
-            {state.connected ? 'All tabs · this window' : 'Reconnecting…'}
+            {state.connected ? 'Tabs / this workspace' : 'Reconnecting...'}
           </span>
           <button
             className={`icon-button ${state.settings ? 'selected' : ''}`}
             aria-label={state.settings ? 'Back to tabs' : 'Open settings'}
             aria-pressed={state.settings}
             onClick={() => {
+              setLibrary(false);
               state.setSettings(!state.settings);
               setShowAIPanel(false);
               setBookmarks(false);
@@ -992,6 +1115,8 @@ export function Sidebar({
             </button>
           )}
         </footer>
+      </aside>
+      {commandPaletteOpen && (
         <CommandPalette
           isOpen={commandPaletteOpen}
           onClose={closeCommandPalette}
@@ -1001,7 +1126,7 @@ export function Sidebar({
           bookmarks={paletteBookmarks}
           isImmersive={state.windowState.immersive}
         />
-      </aside>
+      )}
     </div>
   );
 }

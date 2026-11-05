@@ -143,8 +143,6 @@ export function moveFolder(
 ): Metadata {
   const folder = metadata.folders.find((f) => f.id === id);
   if (!folder) throw new Error('Folder not found.');
-  if (folder.workspaceId !== workspaceId)
-    throw new Error('Folder not in workspace.');
   if (parentId === id) throw new Error('Cannot move a folder into itself.');
 
   let currentParentId = parentId;
@@ -157,10 +155,62 @@ export function moveFolder(
     currentParentId = parent.parentId;
   }
 
+  if (!metadata.workspaces.some((w) => w.id === workspaceId))
+    throw Error('Workspace no longer exists.');
+  if (
+    parentId &&
+    !metadata.folders.some(
+      (f) => f.id === parentId && f.workspaceId === workspaceId,
+    )
+  )
+    throw Error('Folder destination is no longer available.');
+  const subtree = new Set([id]);
+  let changed = true;
+  while (changed) {
+    changed = false;
+    for (const f of metadata.folders)
+      if (f.parentId && subtree.has(f.parentId) && !subtree.has(f.id)) {
+        subtree.add(f.id);
+        changed = true;
+      }
+  }
+  const moving = metadata.pinnedEntries.filter(
+    (e) => e.folderId && subtree.has(e.folderId),
+  );
+  if (
+    folder.workspaceId !== workspaceId &&
+    moving.some((e) =>
+      metadata.pinnedEntries.some(
+        (other) =>
+          other.workspaceId === workspaceId &&
+          resourceKey(other.url) === resourceKey(e.url),
+      ),
+    )
+  )
+    throw Error(
+      'Destination already contains one of these addresses. Move entries individually first.',
+    );
   return {
     ...metadata,
     folders: metadata.folders.map((f) =>
-      f.id === id ? { ...f, parentId } : f,
+      subtree.has(f.id)
+        ? {
+            ...f,
+            workspaceId,
+            ...(f.id === id
+              ? {
+                  parentId,
+                  order: metadata.folders.filter(
+                    (o) =>
+                      o.workspaceId === workspaceId && o.parentId === parentId,
+                  ).length,
+                }
+              : {}),
+          }
+        : f,
+    ),
+    pinnedEntries: metadata.pinnedEntries.map((e) =>
+      moving.some((m) => m.id === e.id) ? { ...e, workspaceId } : e,
     ),
   };
 }

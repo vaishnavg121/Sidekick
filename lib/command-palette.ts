@@ -79,12 +79,14 @@ function scoreMatch(query: string, title: string, url?: string): number {
 
   // Fuzzy match (simple character sequence)
   let ti = 0;
+  let matched = 0;
   for (const ch of q) {
     const idx = t.indexOf(ch, ti);
     if (idx === -1) break;
     ti = idx + 1;
+    matched++;
   }
-  if (ti > 0 && ti === q.length) {
+  if (matched === q.length) {
     return 100;
   }
 
@@ -218,7 +220,7 @@ function buildTabResults(
     // Boost active tab
     const activeBoost = tab.active ? 50 : 0;
     // Boost current workspace tabs
-    const workspaceBoost = 0; // Could add workspace matching if needed
+    const workspaceBoost = 25;
 
     results.push({
       id: `tab:${tab.id}`,
@@ -438,7 +440,7 @@ function buildNavigationResult(query: string): CommandPaletteResult | null {
     description: 'Search using Google',
     icon: 'search',
     action: { type: 'search-web', payload: { query: trimmed } },
-    score: 1500,
+    score: 75,
     group: 'Navigate',
   };
 }
@@ -489,8 +491,30 @@ export function searchCommandPalette(
   });
 
   // Deduplicate by ID (keep highest scoring)
+  const tabUrls = new Map(index.tabs.map((t) => [t.id, t.url]));
+  const canonical = (url: string) => {
+    try {
+      return new URL(url).href;
+    } catch {
+      return url;
+    }
+  };
+  const destinations = new Set(
+    allResults
+      .filter((r) => r.category === 'tabs')
+      .map((r) =>
+        canonical(
+          tabUrls.get((r.action.payload as { tabId: number }).tabId) ?? '',
+        ),
+      ),
+  );
   const seen = new Set<string>();
   const deduped = allResults.filter((r) => {
+    if (['favorites', 'pinned', 'bookmarks'].includes(r.category)) {
+      const destination = canonical(r.description);
+      if (destinations.has(destination)) return false;
+      destinations.add(destination);
+    }
     if (seen.has(r.id)) return false;
     seen.add(r.id);
     return true;

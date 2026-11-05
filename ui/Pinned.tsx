@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useRef, useEffect } from 'react';
 import type { SidebarClient } from '../lib/client';
 import type { PinnedEntry, Folder } from '../lib/models';
 import type { Command } from '../lib/protocol';
@@ -17,6 +17,8 @@ import { Icon } from './Icon';
 
 export function Pinned({ client }: { client: SidebarClient }) {
   const state = useSidebar();
+  const expandTimer = useRef<ReturnType<typeof setTimeout>>(undefined);
+  useEffect(() => () => clearTimeout(expandTimer.current), []);
   const [editing, setEditing] = useState<PinnedEntry | 'new'>();
   const [menu, setMenu] = useState<string>();
   const [folderEditor, setFolderEditor] = useState<Folder | 'new'>();
@@ -47,9 +49,19 @@ export function Pinned({ client }: { client: SidebarClient }) {
   ) => {
     const item = readDrag(event);
     if (!item) return;
-    if (!validateDragItem(item, ['tab', 'pinned'], [workspaceId])) return;
+    if (!validateDragItem(item, ['tab', 'pinned', 'folder'], [workspaceId]))
+      return;
     event.preventDefault();
     event.stopPropagation();
+    if (item.kind === 'folder') {
+      run({
+        type: 'folder.move',
+        id: item.id,
+        workspaceId,
+        parentId: folderId,
+      });
+      return;
+    }
     if (item.kind === 'tab')
       run({
         type: 'resource.current',
@@ -234,6 +246,14 @@ export function Pinned({ client }: { client: SidebarClient }) {
             >
               Unpin
             </button>
+            <button
+              role="menuitem"
+              onClick={() =>
+                run({ type: 'archive.resource', kind: 'pinned', id: entry.id })
+              }
+            >
+              Archive pinned entry
+            </button>
             <button role="menuitem" onClick={() => setMenu(undefined)}>
               Close menu
             </button>
@@ -247,11 +267,59 @@ export function Pinned({ client }: { client: SidebarClient }) {
       key={folder.id}
       className="pinned-folder"
       data-folder-id={folder.id}
-      onDragOver={handleDragOver}
-      onDrop={(event) => drop(event, folder.id)}
-      onDragLeave={handleDragLeave}
+      draggable
+      onDragStart={(event) => {
+        event.stopPropagation();
+        startDrag(event, { kind: 'folder', id: folder.id, workspaceId });
+        setDragImage(event, folder.name);
+      }}
+      onDragOver={(event) => {
+        handleDragOver(event);
+        if (folder.collapsed && !expandTimer.current)
+          expandTimer.current = setTimeout(() => {
+            run({
+              type: 'folder.save',
+              input: { ...folder, collapsed: false },
+            });
+            expandTimer.current = undefined;
+          }, 650);
+      }}
+      onDragLeave={() => {
+        clearTimeout(expandTimer.current);
+        expandTimer.current = undefined;
+      }}
+      onDrop={(event) => {
+        clearTimeout(expandTimer.current);
+        expandTimer.current = undefined;
+        drop(event, folder.id);
+      }}
       onDragEnd={handleDragEnd}
     >
+      <div
+        className="folder-insertion"
+        aria-label={'Insert before folder ' + folder.name}
+        onDragOver={allowDrag}
+        onDrop={(event) => {
+          const item = readDrag(event);
+          if (item?.kind !== 'folder') return;
+          event.preventDefault();
+          event.stopPropagation();
+          const siblings = folders.filter(
+            (f) => f.parentId === folder.parentId,
+          );
+          if (siblings.some((f) => f.id === item.id))
+            run({
+              type: 'folder.reorder',
+              workspaceId,
+              parentId: folder.parentId,
+              ids: moveBefore(
+                siblings.map((f) => f.id),
+                item.id,
+                folder.id,
+              ),
+            });
+        }}
+      />
       <div className="pinned-folder-heading">
         <button
           className="folder-toggle"
@@ -378,6 +446,33 @@ export function Pinned({ client }: { client: SidebarClient }) {
                 ))}
             </select>
           </label>
+          {folderEditor !== 'new' && (
+            <button
+              type="button"
+              className="text-button"
+              onClick={() => {
+                const siblings = folders.filter(
+                  (f) => f.parentId === folderEditor.parentId,
+                );
+                const index = siblings.findIndex(
+                  (f) => f.id === folderEditor.id,
+                );
+                if (index > 0)
+                  run({
+                    type: 'folder.reorder',
+                    workspaceId,
+                    parentId: folderEditor.parentId,
+                    ids: moveBefore(
+                      siblings.map((f) => f.id),
+                      folderEditor.id,
+                      siblings[index - 1]!.id,
+                    ),
+                  });
+              }}
+            >
+              Move folder earlier
+            </button>
+          )}
           <button className="text-button">Save folder</button>
           <button
             className="text-button"

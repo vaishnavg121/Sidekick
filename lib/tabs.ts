@@ -6,6 +6,8 @@ export interface TabItem {
   url: string;
   favicon?: string;
   active: boolean;
+  groupId?: number;
+  nativePinned?: boolean;
   loading: boolean;
   restricted: boolean;
 }
@@ -32,6 +34,8 @@ export function toTabItem(tab: chrome.tabs.Tab): TabItem | undefined {
     url,
     favicon: tab.favIconUrl,
     active: tab.active,
+    groupId: tab.groupId,
+    nativePinned: tab.pinned,
     loading: tab.status === 'loading',
     restricted: isRestrictedUrl(url),
   };

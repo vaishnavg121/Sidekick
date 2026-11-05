@@ -142,8 +142,16 @@ function validateChoiceAnswer(
   if (!allowedChoices.includes(a.choice)) return null;
   const probabilities = a.probabilities as Record<string, number> | undefined;
   if (!probabilities || typeof probabilities !== 'object') return null;
-  const confidence = probabilities[a.choice] ?? 0;
-  if (typeof confidence !== 'number' || confidence < 0 || confidence > 1)
+  const confidence = probabilities[a.choice];
+  if (
+    typeof confidence !== 'number' ||
+    !Number.isFinite(confidence) ||
+    confidence < 0 ||
+    confidence > 1 ||
+    Object.values(probabilities).some(
+      (p) => !Number.isFinite(p) || p < 0 || p > 1,
+    )
+  )
     return null;
   return { choice: a.choice, probabilities, confidence };
 }
@@ -155,20 +163,39 @@ function validateScoreAnswer(
   const a = answer as Record<string, unknown>;
   if (a.type !== 'score') return null;
   const score = a.score as number | undefined;
-  const normalized = a.normalized as number | undefined;
-  if (typeof score !== 'number' || score < 0 || score > 5) return null;
+  const normalized = typeof score === 'number' ? score / 5 : undefined;
+  if (
+    typeof score !== 'number' ||
+    !Number.isFinite(score) ||
+    score < 0 ||
+    score > 5
+  )
+    return null;
   if (typeof normalized !== 'number' || normalized < 0 || normalized > 1)
     return null;
   return { score, normalized };
 }
 
-function escapeHtmlEntities(text: string): string {
-  return text
-    .replace(/&/g, '&')
-    .replace(/</g, '&lt;')
-    .replace(/>/g, '&gt;')
-    .replace(/"/g, '&quot;')
-    .replace(/'/g, '&#039;');
+export function sanitizeAiText(text: string): string {
+  return (
+    text
+      .replace(/[<>]/g, '')
+      .replace(/https?:\/\/[^\s]+/gi, (value) => {
+        try {
+          return new URL(value).hostname;
+        } catch {
+          return '[address]';
+        }
+      })
+      .replace(/[?][^\s]*/g, '')
+      .replace(
+        /(?:token|secret|password|api[_-]?key|authorization)\s*[:=]\s*[^\s]+/gi,
+        '[redacted]',
+      )
+      // eslint-disable-next-line no-control-regex -- scrub control characters from optional metadata
+      .replace(/[\x00-\x1f\x7f]/g, ' ')
+      .slice(0, 500)
+  );
 }
 
 export class AiService {
@@ -180,6 +207,7 @@ export class AiService {
   private queue: Array<() => Promise<unknown>> = [];
 
   setGatewayKey(key: string | undefined) {
+    if (this.gatewayKey !== key) this.clearCache();
     this.gatewayKey = key;
   }
 
@@ -187,7 +215,7 @@ export class AiService {
     key: string,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
-      await this.callJev(
+      const response = await this.callJev(
         {
           model: JEV_MODEL,
           state: 'test',
@@ -200,6 +228,16 @@ export class AiService {
         },
         key,
       );
+      const answer = response.answers.test as unknown as
+        { type: string; probability: number } | undefined;
+      if (
+        !answer ||
+        answer.type !== 'boolean' ||
+        !Number.isFinite(answer.probability) ||
+        answer.probability < 0 ||
+        answer.probability > 1
+      )
+        throw Error('Jev verification returned an invalid answer.');
       return { ok: true };
     } catch (error) {
       return {
@@ -217,21 +255,37 @@ export class AiService {
     const apiKey = key ?? this.gatewayKey;
     if (!apiKey) throw new Error('No Vercel AI Gateway key configured');
 
-    const response = await fetch(JEV_GATEWAY_URL, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        Authorization: `Bearer ${apiKey}`,
-      },
-      body: JSON.stringify(request),
+    const response = await this.enqueue(() =>
+      fetch(JEV_GATEWAY_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify(request),
+        signal: AbortSignal.timeout(20000),
+        credentials: 'omit',
+        redirect: 'error',
+      }),
+    ).catch(() => {
+      throw Error(
+        'Jev request failed or timed out. Check your connection and try again.',
+      );
     });
 
     if (!response.ok) {
-      const error = await response.text();
-      throw new Error(`Jev API error: ${response.status} ${error}`);
+      throw new Error(
+        response.status === 401 || response.status === 403
+          ? 'Jev authorization failed. Check the Gateway key.'
+          : response.status === 429
+            ? 'Jev rate limit or quota reached. Try again later.'
+            : `Jev request failed (HTTP ${response.status}).`,
+      );
     }
 
-    const data = (await response.json()) as JevEvaluateResponse;
+    const data = (await response.json().catch(() => {
+      throw Error('Jev returned malformed JSON. No changes were applied.');
+    })) as JevEvaluateResponse;
 
     if (!data.answers || typeof data.answers !== 'object') {
       throw new Error('Invalid Jev response: missing answers object');
@@ -287,16 +341,18 @@ export class AiService {
   }
 
   private setCache(key: string, result: unknown) {
+    if (this.cache.size >= 100)
+      this.cache.delete(this.cache.keys().next().value!);
     this.cache.set(key, { result, timestamp: Date.now() });
   }
 
   private sanitizeTab(tab: TabItem): string {
     try {
       const url = new URL(tab.url);
-      const safeTitle = escapeHtmlEntities(tab.title.slice(0, 100));
+      const safeTitle = sanitizeAiText(tab.title).slice(0, 100);
       return `${tab.id}:${safeTitle} | ${url.hostname}`;
     } catch {
-      const safeTitle = escapeHtmlEntities(tab.title.slice(0, 100));
+      const safeTitle = sanitizeAiText(tab.title).slice(0, 100);
       return `${tab.id}:${safeTitle} | unknown`;
     }
   }
@@ -315,6 +371,8 @@ export class AiService {
     customCategories?: TabCategory[],
     existingClassifications?: Record<number, TabClassification>,
   ): Promise<TabClassification[]> {
+    tabs = tabs.filter((t) => !t.restricted);
+    if (!tabs.length) return [];
     const categories = customCategories ?? DEFAULT_CATEGORIES;
     const categoriesKey = categories.join(',');
     const overridesKey = existingClassifications
@@ -347,7 +405,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`classify_${tab.id}`] = {
           type: 'choice',
-          instructions: `Classify the browser tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") into exactly one category based on its title and domain.`,
+          instructions: `Classify the browser tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}") into exactly one category based on its title and domain.`,
           criteria,
         };
       }
@@ -371,13 +429,9 @@ export class AiService {
             reasoning: `Jev classified as ${validated.choice}`,
           });
         } else {
-          // No valid classification - return unknown with 0 confidence
-          results.push({
-            tabId: tab.id,
-            category: 'Other' as TabCategory,
-            confidence: 0,
-            reasoning: 'Classification failed or returned invalid category',
-          });
+          throw Error(
+            'Jev returned an invalid classification. No categories were changed.',
+          );
         }
       }
     }
@@ -407,7 +461,7 @@ export class AiService {
     tabs: TabItem[],
     workspaces: Workspace[],
   ): Promise<WorkspaceRecommendation[]> {
-    if (workspaces.length === 0) {
+    if (workspaces.length < 2) {
       return [];
     }
 
@@ -424,7 +478,7 @@ export class AiService {
     for (const ws of workspaces) {
       criteria[ws.id] = ws.name;
     }
-    const allowedChoices = workspaces.map((w) => `${w.id}:${w.name}`);
+    const allowedChoices = workspaces.map((w) => w.id);
 
     const results: WorkspaceRecommendation[] = [];
 
@@ -440,7 +494,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`route_${tab.id}`] = {
           type: 'choice',
-          instructions: `Select the best workspace for the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") from the available workspaces.`,
+          instructions: `Select the best workspace for the tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}") from the available workspaces.`,
           criteria,
         };
       }
@@ -458,7 +512,7 @@ export class AiService {
         const validated = validateChoiceAnswer(answer, allowedChoices);
 
         if (validated) {
-          const workspaceId = validated.choice.split(':')[0]!;
+          const workspaceId = validated.choice;
           const workspace = workspaces.find((w) => w.id === workspaceId);
           if (workspaceId && workspace && validWorkspaceIds.has(workspaceId)) {
             results.push({
@@ -508,7 +562,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`topic_${tab.id}`] = {
           type: 'choice',
-          instructions: `What is the main topic of the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}")? Choose the most specific topic, or "none" if no group fits.`,
+          instructions: `What is the main topic of the tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}")? Choose the most specific topic, or "none" if no group fits.`,
           criteria: {
             none: 'No group fits this tab',
             ...Object.fromEntries(TOPIC_CHOICES.map((t) => [t, t])),
@@ -580,12 +634,13 @@ export class AiService {
       for (const tab of batch) {
         questions[`focus_${tab.id}`] = {
           type: 'score',
-          instructions: `Score how relevant the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") is to the user's focus goal: "${goal}". 0 = not relevant, 1 = highly relevant.`,
+          instructions: `Score how relevant the tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}") is to the user's focus goal: "${sanitizeAiText(goal)}". 0 = not relevant, 1 = highly relevant.`,
           criteria: [
             'not relevant',
             'slightly relevant',
             'moderately relevant',
             'highly relevant',
+            'very highly relevant',
             'critically relevant',
           ],
         };
@@ -622,12 +677,9 @@ export class AiService {
             reason,
           });
         } else {
-          // Invalid or missing score - default to not relevant
-          results.push({
-            tabId: tab.id,
-            score: 0,
-            reason: 'Focus scoring failed or returned invalid score',
-          });
+          throw Error(
+            'Jev returned an invalid focus score. No tabs were hidden.',
+          );
         }
       }
     }
@@ -647,23 +699,20 @@ export class AiService {
     for (const tab of tabs) {
       const rawUrl = tab.url?.trim();
       if (!rawUrl) continue;
-      const hashIndex = rawUrl.indexOf('#');
-      let baseUrl = rawUrl;
-      if (hashIndex >= 0) baseUrl = rawUrl.slice(0, hashIndex);
-      // Keep query parameters for duplicate detection - only strip fragment
-      const normalized = baseUrl;
+      const normalized = rawUrl; // Exact identity includes fragment and query; sessions may differ.
       const existing = urlMap.get(normalized) ?? [];
       existing.push(tab.id);
       urlMap.set(normalized, existing);
     }
 
     const localDuplicates: CleanupSuggestion[] = [];
-    for (const [url, ids] of urlMap) {
+    for (const ids of urlMap.values()) {
       if (ids.length > 1) {
         localDuplicates.push({
           type: 'duplicate',
           tabIds: ids.slice(1),
-          description: `Exact duplicate of ${url}`,
+          description:
+            'Exact duplicate URL. Keep the original tab; review sessions before closing.',
         });
       }
     }
@@ -690,7 +739,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`cleanup_${tab.id}`] = {
           type: 'choice',
-          instructions: `Should the tab with ID ${tab.id} (title: "${tab.title.slice(0, 80)}") be cleaned up? Choose the type of cleanup if applicable.`,
+          instructions: `Should the tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}") be cleaned up? Choose the type of cleanup if applicable.`,
           criteria: {
             keep: 'Tab is useful and should be kept',
             duplicate: 'Tab is a semantic duplicate of another tab',

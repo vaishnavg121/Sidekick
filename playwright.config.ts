@@ -6,11 +6,11 @@ export default defineConfig({
   expect: { timeout: 10000 },
   reporter: 'list',
   projects: [
-    { name: 'chrome', use: { headless: true } },
+    { name: 'chrome', use: { headless: true }, grepInvert: /Immersive/ },
     {
       name: 'chrome-headed',
       use: { headless: false },
-      grep: /Pin opens|Immersive|Docking visual/,
+      grep: /Pin opens|Immersive|Docking visual|Keyboard Chrome command/,
     },
   ],
 });
