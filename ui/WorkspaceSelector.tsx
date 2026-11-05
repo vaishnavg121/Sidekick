@@ -44,7 +44,11 @@ export function WorkspaceSelector({
     if (!item) return;
     // Validate that the item belongs to its claimed source workspace
     if (
-      !validateDragItem(item, ['tab', 'favorite', 'pinned'], [item.workspaceId])
+      !validateDragItem(
+        item,
+        ['tab', 'favorite', 'pinned', 'folder'],
+        [item.workspaceId],
+      )
     )
       return;
 
@@ -58,6 +62,8 @@ export function WorkspaceSelector({
           workspaceId,
         });
       }
+    } else if (item.kind === 'folder') {
+      run({ type: 'folder.move', id: item.id, workspaceId, parentId: null });
     } else if (item.kind === 'favorite') {
       run({
         type: 'resource.move',
@@ -79,7 +85,7 @@ export function WorkspaceSelector({
 
   return (
     <div className="workspace-area">
-      <div className="workspace-strip" role="list" aria-label="Workspaces">
+      <div className="workspace-strip" role="group" aria-label="Workspaces">
         {metadata?.workspaces.map((ws) => (
           <div
             key={ws.id}
@@ -91,7 +97,16 @@ export function WorkspaceSelector({
             onDragOver={(e) => handleDragOver(e, ws.id)}
             onDragLeave={(e) => handleDragLeave(e, ws.id)}
             onDrop={(e) => handleDrop(e, ws.id)}
-            role="listitem"
+            role="button"
+            tabIndex={0}
+            onClick={() => run({ type: 'workspace.select', id: ws.id })}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter' || e.key === ' ') {
+                e.preventDefault();
+                run({ type: 'workspace.select', id: ws.id });
+              }
+            }}
+            aria-pressed={ws.id === metadata.activeWorkspaceId}
             aria-label={ws.name}
             title={ws.name}
             style={{ backgroundColor: ws.color }}

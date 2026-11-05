@@ -1,3 +1,4 @@
+import { isLibrary } from './library';
 import {
   createMetadata,
   normalizePreferences,
@@ -92,6 +93,7 @@ export function isMetadata(value: unknown): value is Metadata {
   )
     return false;
   if (!validateFolders(m.folders, ids)) return false;
+  if (m.library !== undefined && !isLibrary(m.library, ids)) return false;
   if (m.aiSettings !== undefined) {
     if (
       typeof m.aiSettings !== 'object' ||
@@ -104,12 +106,71 @@ export function isMetadata(value: unknown): value is Metadata {
       return false;
   }
   if (m.aiState !== undefined) {
+    const a = m.aiState;
+    const record = (v: unknown): v is Record<string, unknown> =>
+      !!v &&
+      typeof v === 'object' &&
+      !Array.isArray(v) &&
+      Object.keys(v).length <= 10000;
+    const number = (v: unknown) =>
+      typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+    const strings = (v: unknown) =>
+      Array.isArray(v) &&
+      v.length <= 10000 &&
+      v.every((s) => typeof s === 'string' && s.length <= 4096);
     if (
-      typeof m.aiState !== 'object' ||
-      m.aiState === null ||
-      typeof m.aiState.tabClassifications !== 'object' ||
-      typeof m.aiState.rejectedRecommendations !== 'object' ||
-      typeof m.aiState.focusPreferences !== 'object'
+      !record(a) ||
+      !record(a.tabClassifications) ||
+      !record(a.rejectedRecommendations) ||
+      !record(a.focusPreferences)
+    )
+      return false;
+    if (
+      !Object.values(a.focusPreferences).every(
+        (p) =>
+          p &&
+          typeof p === 'object' &&
+          typeof p.goal === 'string' &&
+          p.goal.length <= 500 &&
+          typeof p.mode === 'boolean' &&
+          Array.isArray(p.hiddenTabIds) &&
+          p.hiddenTabIds.every(Number.isInteger) &&
+          (p.hiddenUrls === undefined || strings(p.hiddenUrls)) &&
+          typeof p.lastUpdated === 'string',
+      )
+    )
+      return false;
+    if (!Object.values(a.rejectedRecommendations).every(strings)) return false;
+    if (
+      a.rejectedByUrl !== undefined &&
+      (!record(a.rejectedByUrl) ||
+        !Object.values(a.rejectedByUrl).every(strings))
+    )
+      return false;
+    const category = (c: unknown) => {
+      if (!record(c)) return false;
+      return (
+        [
+          'Development',
+          'Research',
+          'Education',
+          'Documentation',
+          'Productivity',
+          'Entertainment',
+          'Shopping',
+          'Communication',
+          'Other',
+        ].includes(String(c.category)) &&
+        number(c.confidence) &&
+        typeof c.reasoning === 'string' &&
+        c.reasoning.length <= 1000
+      );
+    };
+    if (!Object.values(a.tabClassifications).every(category)) return false;
+    if (
+      a.acceptedByUrl !== undefined &&
+      (!record(a.acceptedByUrl) ||
+        !Object.values(a.acceptedByUrl).every(category))
     )
       return false;
   }
@@ -122,6 +183,15 @@ export function isMetadata(value: unknown): value is Metadata {
   );
 }
 export class MetadataRepository {
+  async getRestoreHints(): Promise<unknown> {
+    return (await this.area.get('sidekick.restore-hints.v1'))[
+      'sidekick.restore-hints.v1'
+    ];
+  }
+  async saveRestoreHints(value: unknown): Promise<void> {
+    await this.area.set({ 'sidekick.restore-hints.v1': value });
+  }
+
   private queue: Promise<unknown> = Promise.resolve();
   constructor(private area: StorageArea) {}
   // Serialize read-modify-write operations in the single background owner.
@@ -174,8 +244,34 @@ export class MetadataRepository {
       return { ...m, activeWorkspaceId: id };
     });
   }
-  // Metadata authoring APIs for later milestones; deliberately not exposed by
-  // milestone 1 messaging or UI. Validation checks all references atomically.
+  deleteWorkspace(id: string): Promise<Metadata> {
+    return this.update((m) => {
+      if (m.workspaces.length <= 1 || !m.workspaces.some((w) => w.id === id))
+        throw Error('Keep at least one workspace.');
+      const library = m.library;
+      if (
+        [
+          ...m.favorites,
+          ...m.pinnedEntries,
+          ...m.folders,
+          ...(library?.sessions ?? []),
+          ...(library?.archive ?? []),
+          ...(library?.snoozed ?? []),
+        ].some((e) => e.workspaceId === id)
+      )
+        throw Error(
+          'Move or remove this workspace’s saved resources and Library entries before deleting it.',
+        );
+      const remaining = m.workspaces.filter((w) => w.id !== id);
+      return {
+        ...m,
+        workspaces: remaining,
+        activeWorkspaceId:
+          m.activeWorkspaceId === id ? remaining[0]!.id : m.activeWorkspaceId,
+      };
+    });
+  }
+  // Authoring mutations validate references atomically in the background owner.
   saveWorkspace(workspace: Workspace): Promise<Metadata> {
     return this.update((m) => ({
       ...m,
@@ -270,7 +366,6 @@ export class MetadataRepository {
       };
       return {
         ...m,
-        activeWorkspaceId: workspace.id,
         workspaces: upsert(m.workspaces, workspace),
       };
     });
@@ -335,7 +430,7 @@ export class MetadataRepository {
       ),
     }));
   }
-  private update(change: (m: Metadata) => Metadata): Promise<Metadata> {
+  update(change: (m: Metadata) => Metadata): Promise<Metadata> {
     return this.serial(async () => {
       const next = change(await this.read());
       if (!isMetadata(next)) throw new Error('Invalid workspace metadata.');
@@ -350,7 +445,7 @@ function upsert<T extends { id: string }>(items: T[], item: T): T[] {
     ? [...items, item]
     : items.map((value, i) => (i === index ? item : value));
 }
-// Foundation for future group switching; browser-session storage clears on browser restart.
+// Legacy session schema retained for compatibility. WorkspaceEngine uses v2 membership.
 export class SessionRepository {
   constructor(private area: StorageArea) {}
   async get(): Promise<WorkspaceSession> {

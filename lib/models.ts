@@ -1,3 +1,4 @@
+import type { Library } from './library';
 export type SidebarMode = 'hidden' | 'hover' | 'docked' | 'pinned';
 export type Theme = 'dark' | 'light' | 'system';
 export type ResourceKind = 'favorite' | 'pinned';
@@ -36,6 +37,8 @@ export interface Folder {
   collapsed?: boolean;
 }
 export interface Metadata {
+  library?: Library;
+  onboardingDismissed?: boolean;
   version: 1;
   layoutVersion?: 2;
   workspaces: Workspace[];
@@ -48,6 +51,11 @@ export interface Metadata {
   aiState?: AiState;
 }
 export interface AiState {
+  acceptedByUrl?: Record<
+    string,
+    { category: TabCategory; confidence: number; reasoning: string }
+  >;
+  rejectedByUrl?: Record<string, string[]>;
   tabClassifications: Record<number, TabClassification>;
   rejectedRecommendations: Record<number, string[]>; // tabId -> workspaceId[]
   focusPreferences: Record<string, FocusPreference>; // workspaceId -> FocusPreference
@@ -56,6 +64,7 @@ export interface FocusPreference {
   goal: string;
   mode: boolean;
   hiddenTabIds: number[];
+  hiddenUrls?: string[];
   lastUpdated: string;
 }
 // Browser-session handles only. Never persist these in chrome.storage.local.
@@ -68,11 +77,11 @@ export interface WorkspaceSession {
   memberships: SessionMembership[];
   groups: { workspaceId: string; windowId: number; groupId: number }[];
 }
-// A future implementation can manage groups in one window without changing metadata.
+// Legacy public contract retained; WorkspaceEngine owns logical switching.
 export interface WorkspaceSwitcher {
   activate(workspaceId: string, windowId: number): Promise<void>;
 }
-// Deliberately no implementation or key material in milestone 1.
+// Credentials are held only by the trusted background/settings contexts.
 export interface SecretProvider {
   getGatewayKey(): Promise<string | undefined>;
   clearGatewayKey(): Promise<void>;

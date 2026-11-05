@@ -537,6 +537,24 @@ test('Pinned rename, reorder, workspace moves, Today drag and closed-tab reopeni
       (await chrome.tabs.query({})).find((t) => t.url === url)!.id!,
     origin + '/pin-second',
   );
+  // Bringing a native Chrome tab to front follows its assigned source workspace.
+  // Explicitly move the real tab before dragging it as a target-workspace member.
+  await ui
+    .getByLabel('Workspace', { exact: true })
+    .selectOption(originalWorkspace);
+  await ui
+    .getByRole('button', {
+      name: 'Actions for tab Dock garden /pin-second',
+      exact: true,
+    })
+    .click();
+  await ui
+    .getByLabel('Move Dock garden /pin-second to workspace', { exact: true })
+    .selectOption(targetWorkspace);
+  await ui
+    .getByLabel('Workspace', { exact: true })
+    .selectOption(targetWorkspace);
+  await expect(ui).toHaveAttribute('data-workspace-id', targetWorkspace);
   const data = await second.evaluateHandle(() => new DataTransfer());
   await data.evaluate(
     (drag, value) =>
@@ -578,7 +596,7 @@ test('Pinned rename, reorder, workspace moves, Today drag and closed-tab reopeni
 
 test('New Tab includes one shared sidebar, workspace authoring and per-workspace themes/resources', async () => {
   const page = await context.newPage();
-  await page.goto('chrome://newtab/');
+  await page.goto(new URL('dashboard.html', worker.url()).href);
   await expect(page.locator('.newtab-shell>.embedded .sidebar')).toHaveCount(1);
   await expect(
     page.getByRole('heading', { name: 'Make room for what matters.' }),
@@ -588,7 +606,7 @@ test('New Tab includes one shared sidebar, workspace authoring and per-workspace
     await worker.evaluate(
       () => chrome.runtime.getManifest().chrome_url_overrides?.newtab,
     ),
-  ).toBe('newtab.html');
+  ).toBeUndefined();
   const sidebar = page.locator('.embedded');
   await sidebar
     .getByRole('button', { name: 'Create workspace', exact: true })

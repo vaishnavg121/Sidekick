@@ -1,3 +1,7 @@
+import {
+  isProductivityCommand,
+  type ProductivityCommand,
+} from './productivity';
 import type {
   Metadata,
   SidebarPreferences,
@@ -78,6 +82,16 @@ export type AuthorCommand =
   | { type: 'folder.remove'; id: string };
 export type Command =
   | AuthorCommand
+  | ProductivityCommand
+  | { type: 'dashboard.open' | 'settings.open' | 'shortcuts.read' }
+  | {
+      type: 'focus.update';
+      goal: string;
+      mode: boolean;
+      hiddenUrls?: string[];
+      hiddenTabIds?: number[];
+    }
+  | { type: 'ai.route.reject'; tabId: number; workspaceId: string }
   | { type: 'tab.activate' | 'tab.close'; tabId: number }
   | { type: 'tab.create' }
   | {
@@ -106,7 +120,7 @@ export type Command =
   | { type: 'sidebar.mode'; mode: 'hidden' | 'hover' | 'docked' }
   | { type: 'search.update'; query: string }
   | { type: 'preferences.update'; patch: Partial<SidebarPreferences> }
-  | { type: 'workspace.select'; id: string }
+  | { type: 'workspace.select' | 'workspace.delete'; id: string }
   | { type: 'ai.settings.update'; patch: Partial<AiSettings> }
   | { type: 'ai.classify'; tabIds: number[] }
   | { type: 'ai.route'; tabIds: number[] }
@@ -118,13 +132,6 @@ export type Command =
   | { type: 'ai.apply.groups'; groups: RelatedTabGroup[] }
   | { type: 'ai.apply.focus'; relevance: FocusRelevance[] }
   | { type: 'ai.apply.cleanup'; suggestions: CleanupSuggestion[] }
-  | { type: 'command-palette.open' }
-  | { type: 'command-palette.close' }
-  | {
-      type: 'command-palette.action';
-      action: string;
-      payload: Record<string, unknown>;
-    }
   | { type: 'tab.updateWorkspace'; tabId: number; workspaceId: string };
 export type Request = {
   channel: 'sidekick';
@@ -132,9 +139,21 @@ export type Request = {
   command: Command;
 };
 export type Reply =
-  { ok: true; bookmarks?: BookmarkItem[] } | { ok: false; error: string };
+  | {
+      ok: true;
+      bookmarks?: BookmarkItem[];
+      backup?: string;
+      preview?: { token: string; workspaces: number; pages: number };
+      shortcuts?: chrome.commands.Command[];
+    }
+  | { ok: false; error: string };
 export type ServerEvent =
-  | { type: 'focus'; address: boolean; openCommandPalette?: boolean }
+  | {
+      type: 'focus';
+      address: boolean;
+      openCommandPalette?: boolean;
+      uiAction?: 'focus-tab-search' | 'organize-jev';
+    }
   | {
       type: 'snapshot';
       tabs: TabItem[];
@@ -174,8 +193,33 @@ export function isCommand(value: unknown): value is Command {
   const id = (value: unknown) =>
     typeof value === 'string' && value.length > 0 && value.length < 200;
   const nullableId = (value: unknown) => value === null || id(value);
+  if (isProductivityCommand(c)) return true;
   const kind = c.kind === 'favorite' || c.kind === 'pinned';
   switch (c.type) {
+    case 'dashboard.open':
+    case 'settings.open':
+    case 'shortcuts.read':
+      return true;
+    case 'focus.update':
+      return (
+        typeof c.goal === 'string' &&
+        c.goal.length <= 500 &&
+        typeof c.mode === 'boolean' &&
+        (c.hiddenTabIds === undefined ||
+          (Array.isArray(c.hiddenTabIds) &&
+            c.hiddenTabIds.length <= 1000 &&
+            c.hiddenTabIds.every(tabId))) &&
+        (c.hiddenUrls === undefined ||
+          (Array.isArray(c.hiddenUrls) &&
+            c.hiddenUrls.length <= 1000 &&
+            c.hiddenUrls.every(
+              (u) => typeof u === 'string' && u.length <= 4096,
+            )))
+      );
+    case 'ai.route.reject':
+      return (
+        Number.isInteger(c.tabId) && Number(c.tabId) >= 0 && id(c.workspaceId)
+      );
     case 'resource.save': {
       if (!kind || !c.input || typeof c.input !== 'object') return false;
       const input = c.input as Record<string, unknown>;
@@ -319,6 +363,7 @@ export function isCommand(value: unknown): value is Command {
       return c.mode === 'hidden' || c.mode === 'hover' || c.mode === 'docked';
     case 'search.update':
       return typeof c.query === 'string' && c.query.length <= 2000;
+    case 'workspace.delete':
     case 'workspace.select':
       return typeof c.id === 'string' && c.id.length < 200;
     case 'preferences.update': {
@@ -332,40 +377,22 @@ export function isCommand(value: unknown): value is Command {
             Number.isFinite(v),
       );
     }
-    case 'ai.settings.update': {
-      if (!c.patch || typeof c.patch !== 'object' || Array.isArray(c.patch))
-        return false;
-      return Object.entries(c.patch).every(
-        ([key, v]) =>
-          [
-            'gatewayKey',
-            'connected',
-            'status',
-            'lastError',
-            'lastVerified',
-          ].includes(key) &&
-          (key === 'gatewayKey'
-            ? typeof v === 'string' || v === undefined
-            : key === 'connected'
-              ? typeof v === 'boolean'
-              : key === 'status'
-                ? ['disconnected', 'connecting', 'connected', 'error'].includes(
-                    String(v),
-                  )
-                : key === 'lastError'
-                  ? typeof v === 'string' || v === undefined
-                  : key === 'lastVerified'
-                    ? typeof v === 'string' || v === undefined
-                    : true),
+    case 'ai.settings.update':
+      return (
+        !!c.patch &&
+        typeof c.patch === 'object' &&
+        !Array.isArray(c.patch) &&
+        Object.keys(c.patch).length === 1 &&
+        typeof (c.patch as Record<string, unknown>).gatewayKey === 'string' &&
+        String((c.patch as Record<string, unknown>).gatewayKey).length <= 1000
       );
-    }
     case 'ai.classify':
     case 'ai.route':
     case 'ai.group':
     case 'ai.cleanup':
       return (
         Array.isArray(c.tabIds) &&
-        c.tabIds.length <= 100 &&
+        c.tabIds.length <= 500 &&
         c.tabIds.every(
           (t): t is number =>
             typeof t === 'number' && Number.isInteger(t) && t >= 0,
@@ -376,7 +403,7 @@ export function isCommand(value: unknown): value is Command {
         typeof c.goal === 'string' &&
         c.goal.length <= 500 &&
         Array.isArray(c.tabIds) &&
-        c.tabIds.length <= 100 &&
+        c.tabIds.length <= 500 &&
         c.tabIds.every(
           (t): t is number =>
             typeof t === 'number' && Number.isInteger(t) && t >= 0,
@@ -385,31 +412,23 @@ export function isCommand(value: unknown): value is Command {
     case 'ai.apply.classification':
       return (
         Array.isArray(c.classifications) &&
-        c.classifications.length <= 100 &&
-        c.classifications.every(
-          (cls: unknown) =>
-            cls &&
-            typeof cls === 'object' &&
-            typeof (cls as Record<string, unknown>).tabId === 'number' &&
-            typeof (cls as Record<string, unknown>).category === 'string' &&
-            typeof (cls as Record<string, unknown>).confidence === 'number' &&
-            typeof (cls as Record<string, unknown>).reasoning === 'string',
-        )
+        c.classifications.length <= 500 &&
+        c.classifications.every((v) => isClassification(v))
       );
     case 'ai.apply.routing':
       return (
         Array.isArray(c.recommendations) &&
-        c.recommendations.length <= 100 &&
+        c.recommendations.length <= 500 &&
         c.recommendations.every(
-          (rec: unknown) =>
-            rec &&
-            typeof rec === 'object' &&
-            typeof (rec as Record<string, unknown>).tabId === 'number' &&
-            typeof (rec as Record<string, unknown>).workspaceId === 'string' &&
-            typeof (rec as Record<string, unknown>).workspaceName ===
-              'string' &&
-            typeof (rec as Record<string, unknown>).reason === 'string' &&
-            typeof (rec as Record<string, unknown>).confidence === 'number',
+          (v) =>
+            v &&
+            typeof v === 'object' &&
+            tabId(v.tabId) &&
+            id(v.workspaceId) &&
+            typeof v.workspaceName === 'string' &&
+            v.workspaceName.length <= 60 &&
+            text(v.reason) &&
+            probability(v.confidence),
         )
       );
     case 'ai.apply.groups':
@@ -417,56 +436,47 @@ export function isCommand(value: unknown): value is Command {
         Array.isArray(c.groups) &&
         c.groups.length <= 100 &&
         c.groups.every(
-          (grp: unknown) =>
-            grp &&
-            typeof grp === 'object' &&
-            Array.isArray((grp as Record<string, unknown>).tabs) &&
-            typeof (grp as Record<string, unknown>).topic === 'string' &&
-            typeof (grp as Record<string, unknown>).description === 'string',
+          (v) =>
+            v &&
+            typeof v === 'object' &&
+            Array.isArray(v.tabs) &&
+            v.tabs.length > 1 &&
+            v.tabs.length <= 500 &&
+            v.tabs.every(tabId) &&
+            typeof v.topic === 'string' &&
+            v.topic.length > 0 &&
+            v.topic.length <= 80 &&
+            text(v.description),
         )
       );
     case 'ai.apply.focus':
       return (
         Array.isArray(c.relevance) &&
-        c.relevance.length <= 100 &&
+        c.relevance.length <= 500 &&
         c.relevance.every(
-          (rel: unknown) =>
-            rel &&
-            typeof rel === 'object' &&
-            typeof (rel as Record<string, unknown>).tabId === 'number' &&
-            typeof (rel as Record<string, unknown>).score === 'number' &&
-            typeof (rel as Record<string, unknown>).reason === 'string',
+          (v) =>
+            v &&
+            typeof v === 'object' &&
+            tabId(v.tabId) &&
+            probability(v.score) &&
+            text(v.reason),
         )
       );
     case 'ai.apply.cleanup':
       return (
         Array.isArray(c.suggestions) &&
-        c.suggestions.length <= 100 &&
+        c.suggestions.length <= 500 &&
         c.suggestions.every(
-          (sug: unknown) =>
-            sug &&
-            typeof sug === 'object' &&
-            ['duplicate', 'stale', 'low-value'].includes(
-              String((sug as Record<string, unknown>).type),
-            ) &&
-            Array.isArray((sug as Record<string, unknown>).tabIds) &&
-            typeof (sug as Record<string, unknown>).description === 'string',
+          (v) =>
+            v &&
+            typeof v === 'object' &&
+            ['duplicate', 'stale', 'low-value'].includes(v.type) &&
+            Array.isArray(v.tabIds) &&
+            v.tabIds.length <= 500 &&
+            v.tabIds.every(tabId) &&
+            text(v.description),
         )
       );
-    case 'command-palette.open':
-    case 'command-palette.close':
-      return true;
-    case 'command-palette.action': {
-      const payload = c.payload as Record<string, unknown> | undefined;
-      return (
-        typeof c.action === 'string' &&
-        c.action.length > 0 &&
-        c.action.length <= 100 &&
-        payload !== undefined &&
-        typeof payload === 'object' &&
-        !Array.isArray(payload)
-      );
-    }
     case 'tab.updateWorkspace':
       return (
         typeof c.tabId === 'number' &&
@@ -478,4 +488,29 @@ export function isCommand(value: unknown): value is Command {
     default:
       return false;
   }
+}
+
+const tabId = (v: unknown) => Number.isInteger(v) && Number(v) >= 0;
+const probability = (v: unknown) =>
+  typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 1;
+const text = (v: unknown) => typeof v === 'string' && v.length <= 1000;
+function isClassification(v: unknown): boolean {
+  if (!v || typeof v !== 'object') return false;
+  const c = v as Record<string, unknown>;
+  return (
+    tabId(c.tabId) &&
+    [
+      'Development',
+      'Research',
+      'Education',
+      'Documentation',
+      'Productivity',
+      'Entertainment',
+      'Shopping',
+      'Communication',
+      'Other',
+    ].includes(String(c.category)) &&
+    probability(c.confidence) &&
+    text(c.reasoning)
+  );
 }

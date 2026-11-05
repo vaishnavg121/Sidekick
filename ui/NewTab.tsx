@@ -80,7 +80,7 @@ export function NewTab() {
           <ImmersiveControls client={client} />
           <p className="field-note recovery-note">
             F11 restores Chrome’s toolbar, including after Sidekick is disabled.
-            Workspace selection changes favorites; tab groups stay in place.
+            Workspaces show assigned live tabs; other tabs stay open.
           </p>
           {state.error && (
             <div role="alert" className="error-message">
@@ -107,7 +107,7 @@ export function NewTab() {
             </div>
             <section className="dashboard-card">
               <div className="section-label">
-                THIS WINDOW{' '}
+                THIS WORKSPACE{' '}
                 <span className="tab-count">{state.tabs.length}</span>
               </div>
               <ul className="dashboard-tabs">

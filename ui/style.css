@@ -2053,3 +2053,201 @@ body,
     align-items: stretch;
   }
 }
+
+/* Integrated library, tab menus and compact productivity controls. */
+.options-shell {
+  min-height: 100vh;
+  background: #14151a;
+  display: flex;
+  justify-content: center;
+}
+.options-shell .sidekick-root {
+  width: min(620px, 100vw);
+}
+.options-shell .sidebar {
+  width: 100%;
+  height: 100vh;
+}
+.library-view {
+  overflow-y: auto;
+  flex: 1;
+  min-height: 0;
+}
+.segmented {
+  display: flex;
+  gap: 4px;
+  margin: 12px 0;
+  border: 1px solid var(--sk-border);
+  border-radius: 9px;
+  padding: 3px;
+}
+.segmented button {
+  flex: 1;
+  margin: 0;
+}
+.segmented [aria-pressed='true'] {
+  background: var(--sk-hover);
+  color: var(--sk-accent);
+}
+.saved-page {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0;
+  font-size: 12px;
+}
+.saved-page input {
+  width: 15px;
+  flex-shrink: 0;
+}
+.shortcut-list {
+  display: block;
+  margin: 12px 0 20px;
+}
+.shortcut-list > div {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 8px;
+  font-size: 11px;
+}
+.shortcut-list dd {
+  margin: 0;
+  white-space: nowrap;
+}
+.shortcut-list kbd {
+  padding: 2px 5px;
+  border: 1px solid var(--sk-border);
+  border-radius: 4px;
+  color: var(--sk-muted);
+}
+.onboarding-card {
+  margin: 4px 12px 10px;
+  padding: 10px;
+  background: var(--sk-surface);
+  border: 1px solid var(--sk-border);
+  border-radius: 9px;
+  font-size: 11px;
+  flex-shrink: 0;
+}
+.onboarding-card p {
+  margin: 5px 0;
+  color: var(--sk-muted);
+  line-height: 1.5;
+}
+.tab-actions {
+  position: static;
+  flex-shrink: 0;
+}
+.tab-action-menu {
+  position: absolute;
+  left: 4px;
+  right: 4px;
+  z-index: 30;
+  max-height: 55vh;
+  overflow: auto;
+  padding: 8px;
+  background: var(--sk-bg);
+  box-shadow: 0 8px 28px #0005;
+}
+.tab-action-menu label {
+  display: block;
+  font-size: 11px;
+  margin: 6px 0;
+}
+.tab-action-menu input:not([type='checkbox']),
+.tab-action-menu select {
+  width: 100%;
+  margin-top: 4px;
+}
+.folder-insertion {
+  height: 6px;
+  border-radius: 3px;
+}
+.folder-insertion.drop-ready {
+  background: var(--sk-accent);
+  outline: none;
+}
+.workspace-icon[role='button'] {
+  cursor: pointer;
+}
+.tab-row:focus-within .tab-close,
+.tab-row:focus-within .tab-actions {
+  opacity: 1;
+}
+.command-palette-overlay {
+  z-index: 100;
+  color: var(--sk-text);
+  max-height: 100vh;
+  overflow: auto;
+}
+.command-palette {
+  max-height: 75vh;
+  overflow-y: auto;
+}
+.command-palette-list {
+  margin: 0;
+}
+.info-card > strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+.settings-view input[type='file'] {
+  width: 100%;
+  font-size: 11px;
+  margin: 8px 0;
+}
+@media (prefers-reduced-motion: reduce) {
+  .sidekick-root *,
+  .sidekick-root *::before,
+  .sidekick-root *::after {
+    animation: none !important;
+    transition: none !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.command-palette-overlay {
+  pointer-events: auto;
+}
+.live-group-label {
+  font-size: 10px;
+  font-weight: 600;
+  color: var(--sk-accent);
+  padding: 9px 9px 3px;
+}
+.tab-group-container,
+.tab-group-container > ul {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.tab-category {
+  font-size: 9px;
+  color: var(--sk-muted);
+  max-width: 70px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+[data-workspace-pending='true'] .resources-compact,
+[data-workspace-pending='true'] .tab-list {
+  opacity: 0.55;
+  pointer-events: none;
+}
+
+.folder-toggle {
+  display: flex;
+  justify-content: flex-start;
+  gap: 7px;
+}
+.folder-toggle .truncate {
+  flex: 1;
+  text-align: left;
+}
+.folder-toggle > span:last-child {
+  margin-left: auto;
+}

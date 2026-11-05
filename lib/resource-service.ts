@@ -1,10 +1,67 @@
+import type { WorkspaceEngine } from './workspaces';
 import type { MetadataRepository } from './repository';
 import type { AuthorCommand } from './protocol';
 import { collection, resourceKey } from './resources';
 export class ResourceService {
   private queues = new Map<number, Promise<unknown>>();
-  constructor(private repository: MetadataRepository) {}
+  constructor(
+    private repository: MetadataRepository,
+    private workspaces?: WorkspaceEngine,
+  ) {}
   async handle(command: AuthorCommand, windowId: number): Promise<void> {
+    if (this.workspaces && !['workspace.save'].includes(command.type)) {
+      const m = await this.repository.get();
+      const selected = await this.workspaces.activeWorkspace(windowId);
+      const source =
+        'kind' in command && command.kind === 'favorite'
+          ? m.favorites
+          : m.pinnedEntries;
+      if (
+        ['resource.open', 'resource.remove', 'resource.move'].includes(
+          command.type,
+        ) &&
+        'id' in command &&
+        !source.some((e) => e.id === command.id && e.workspaceId === selected)
+      )
+        throw Error('Resource no longer exists in this workspace.');
+      if (
+        command.type === 'resource.save' &&
+        (command.input.workspaceId !== selected ||
+          (command.input.id &&
+            !source.some(
+              (e) => e.id === command.input.id && e.workspaceId === selected,
+            )))
+      )
+        throw Error('Resource source workspace changed.');
+      if (
+        (command.type === 'resource.reorder' ||
+          command.type === 'folder.reorder') &&
+        command.workspaceId !== selected
+      )
+        throw Error('The selected workspace changed.');
+      if (
+        (command.type === 'folder.remove' || command.type === 'folder.move') &&
+        !m.folders.some(
+          (f) => f.id === command.id && f.workspaceId === selected,
+        )
+      )
+        throw Error('Folder source workspace changed.');
+      if (
+        command.type === 'folder.save' &&
+        command.input.workspaceId !== selected
+      )
+        throw Error('Folder source workspace changed.');
+      if (command.type === 'resource.current') {
+        const { tabs } = await this.workspaces.snapshot(windowId);
+        if (
+          command.tabId !== undefined &&
+          !tabs.some((t) => t.id === command.tabId)
+        )
+          throw Error('Tab is not in the selected workspace.');
+        if (command.tabId === undefined && !tabs.some((t) => t.active))
+          throw Error('No active tab in this workspace.');
+      }
+    }
     switch (command.type) {
       case 'resource.save':
         await this.repository.authorResource(command.kind, command.input);
@@ -61,7 +118,9 @@ export class ResourceService {
         const metadata = await this.repository.get();
         const url = resourceKey(tab.pendingUrl || tab.url || '');
         await this.repository.authorResource(command.kind, {
-          workspaceId: metadata.activeWorkspaceId,
+          workspaceId: this.workspaces
+            ? await this.workspaces.activeWorkspace(windowId)
+            : metadata.activeWorkspaceId,
           title: (tab.title || url).slice(0, 200),
           url,
           folderId: command.folderId ?? null,
@@ -102,6 +161,10 @@ export class ResourceService {
     );
     if (!entry) throw new Error('Entry no longer exists.');
     const url = resourceKey(entry.url);
+    if (this.workspaces) {
+      await this.workspaces.open(windowId, url, entry.workspaceId);
+      return;
+    }
     const tabs = await chrome.tabs.query({ windowId });
     const existing = tabs.find((tab) => {
       try {

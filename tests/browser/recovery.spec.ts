@@ -42,7 +42,7 @@ test('Immersive extension reload and full browser restart retain a usable exit',
     await expect(developerMode).toHaveAttribute('checked', '');
     await extensions.close();
     let page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/newtab.html`);
+    await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
     await expect(
       page
         .locator('.dashboard')
@@ -170,7 +170,7 @@ test('Immersive extension reload and full browser restart retain a usable exit',
       .poll(
         async () => {
           try {
-            await page.goto(`chrome-extension://${extensionId}/newtab.html`);
+            await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
             return true;
           } catch {
             return false;
@@ -210,7 +210,7 @@ test('Immersive extension reload and full browser restart retain a usable exit',
     await context.close();
     context = await launch();
     page = await context.newPage();
-    await page.goto(`chrome-extension://${extensionId}/newtab.html`);
+    await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
     await expect(
       page
         .locator('.dashboard')

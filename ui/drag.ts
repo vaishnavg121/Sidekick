@@ -40,6 +40,13 @@ export function readDrag(event: DragEvent): DragItem | undefined {
 export function allowDrag(event: DragEvent) {
   if (event.dataTransfer.types.includes(DRAG_TYPE)) {
     event.currentTarget.classList.add('drop-ready');
+    const scroll = event.currentTarget.closest('.scroll-area');
+    if (scroll) {
+      const r = scroll.getBoundingClientRect();
+      if (event.clientY < r.top + 40) scroll.scrollTop -= 14;
+      else if (event.clientY > r.bottom - 40) scroll.scrollTop += 14;
+    }
+
     event.preventDefault();
     event.dataTransfer.dropEffect = 'move';
   }

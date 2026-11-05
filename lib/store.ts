@@ -38,6 +38,7 @@ interface UiState {
   metadata?: Metadata;
   tabs: TabItem[];
   query: string;
+  workspacePending?: string;
   settings: boolean;
   connected: boolean;
   error?: string;
@@ -45,6 +46,7 @@ interface UiState {
   dockStatus: DockStatus;
   ai: AiSuggestionsState;
   setDockStatus(status: DockStatus): void;
+  setWorkspacePending(id?: string): void;
   receive(event: ServerEvent): void;
   setQuery(query: string): void;
   setSettings(settings: boolean): void;
@@ -97,14 +99,31 @@ export const useSidebar = create<UiState>((set) => ({
         },
       })),
   },
+  setWorkspacePending: (workspacePending) => set({ workspacePending }),
   setDockStatus: (dockStatus) => set({ dockStatus }),
   receive: (event: ServerEvent) =>
     event.type === 'focus'
       ? undefined
       : event.type === 'error'
-        ? set({ error: event.error })
+        ? set({ error: event.error, workspacePending: undefined })
         : event.type === 'snapshot'
           ? set((state) => ({
+              ai:
+                state.metadata?.activeWorkspaceId !==
+                event.metadata.activeWorkspaceId
+                  ? {
+                      ...state.ai,
+                      classifications: [],
+                      recommendations: [],
+                      groups: [],
+                      focusRelevance: [],
+                      cleanupSuggestions: [],
+                    }
+                  : state.ai,
+              workspacePending:
+                state.workspacePending === event.metadata.activeWorkspaceId
+                  ? undefined
+                  : state.workspacePending,
               metadata: event.metadata,
               windowState: event.windowState,
               query: event.windowState.query,
@@ -112,7 +131,6 @@ export const useSidebar = create<UiState>((set) => ({
                 type: 'snapshot',
                 tabs: event.tabs,
               }),
-              error: undefined,
             }))
           : undefined,
   setQuery: (query) => set({ query }),

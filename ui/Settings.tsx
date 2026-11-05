@@ -1,16 +1,21 @@
+import type { SidebarClient } from '../lib/client';
+import { DataSettings } from './DataSettings';
 import { useState } from 'react';
 import type { SidebarPreferences, AiSettings } from '../lib/models';
 export function Settings({
+  client,
   preferences,
   update,
   aiSettings,
   updateAiSettings,
 }: {
+  client: SidebarClient;
   preferences: SidebarPreferences;
   update: (patch: Partial<SidebarPreferences>) => void;
   aiSettings: AiSettings;
   updateAiSettings: (patch: Partial<AiSettings>) => Promise<void>;
 }) {
+  const trusted = location.protocol === 'chrome-extension:';
   const [gatewayKey, setGatewayKey] = useState('');
   const [verifying, setVerifying] = useState(false);
   const [showKey, setShowKey] = useState(false);
@@ -104,8 +109,8 @@ export function Settings({
         <p>
           If Chrome's native panel is unavailable, choose Hover overlay. It
           floats over the page while open; collapse it to reach the page
-          underneath. Restricted Chrome pages require the native panel, the New
-          Tab page, or F11.
+          underneath. Restricted Chrome pages require the native panel, the
+          dashboard, or F11.
         </p>
       </div>
       <div className="info-card">
@@ -123,6 +128,14 @@ export function Settings({
         classification, workspace routing, smart grouping, focus filtering, and
         cleanup suggestions.
       </p>
+      {!trusted && (
+        <button
+          className="text-button"
+          onClick={() => void client.command({ type: 'settings.open' })}
+        >
+          Open secure AI settings
+        </button>
+      )}
       <div className="ai-settings-card">
         <div className="ai-status-row">
           <span className="ai-status-label">Vercel AI Gateway</span>
@@ -130,8 +143,8 @@ export function Settings({
             className="ai-status-badge"
             style={{ backgroundColor: statusColors[aiSettings.status] }}
           >
-            {aiSettings.status === 'connected' && aiSettings.gatewayKey
-              ? `Connected · ${aiSettings.gatewayKey.slice(0, 8)}…`
+            {aiSettings.status === 'connected'
+              ? 'Connected'
               : aiSettings.status === 'connecting'
                 ? 'Verifying…'
                 : aiSettings.status === 'error'
@@ -139,7 +152,7 @@ export function Settings({
                   : 'Not connected'}
           </span>
         </div>
-        {aiSettings.status !== 'connected' && (
+        {trusted && aiSettings.status !== 'connected' && (
           <div className="ai-key-input">
             <label>
               API Key
@@ -188,7 +201,7 @@ export function Settings({
             </div>
           </div>
         )}
-        {aiSettings.status === 'connected' && (
+        {trusted && aiSettings.status === 'connected' && (
           <div className="ai-connected-actions">
             <p className="field-note">
               Last verified:{' '}
@@ -225,6 +238,7 @@ export function Settings({
           </div>
         )}
       </div>
+      <DataSettings client={client} />
       <p className="field-note">
         Preferences and workspace metadata stay in this browser. No account or
         internet connection required.
