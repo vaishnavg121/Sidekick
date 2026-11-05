@@ -1,3 +1,4 @@
+import { isAppearance, type Appearance } from './appearance';
 import {
   isProductivityCommand,
   type ProductivityCommand,
@@ -81,6 +82,11 @@ export type AuthorCommand =
     }
   | { type: 'folder.remove'; id: string };
 export type Command =
+  | {
+      type: 'appearance.update';
+      config: Appearance | null;
+      workspaceId?: string;
+    }
   | AuthorCommand
   | ProductivityCommand
   | { type: 'dashboard.open' | 'settings.open' | 'shortcuts.read' }
@@ -90,6 +96,11 @@ export type Command =
       mode: boolean;
       hiddenUrls?: string[];
       hiddenTabIds?: number[];
+    }
+  | {
+      type: 'ai.classification.reject';
+      tabId: number;
+      category: import('./models').TabCategory;
     }
   | { type: 'ai.route.reject'; tabId: number; workspaceId: string }
   | { type: 'tab.activate' | 'tab.close'; tabId: number }
@@ -216,6 +227,13 @@ export function isCommand(value: unknown): value is Command {
               (u) => typeof u === 'string' && u.length <= 4096,
             )))
       );
+    case 'ai.classification.reject':
+      return isClassification({
+        tabId: c.tabId,
+        category: c.category,
+        confidence: 1,
+        reasoning: '',
+      });
     case 'ai.route.reject':
       return (
         Number.isInteger(c.tabId) && Number(c.tabId) >= 0 && id(c.workspaceId)
@@ -366,6 +384,11 @@ export function isCommand(value: unknown): value is Command {
     case 'workspace.delete':
     case 'workspace.select':
       return typeof c.id === 'string' && c.id.length < 200;
+    case 'appearance.update':
+      return (
+        (c.config === null || isAppearance(c.config)) &&
+        (c.workspaceId === undefined || id(c.workspaceId))
+      );
     case 'preferences.update': {
       if (!c.patch || typeof c.patch !== 'object' || Array.isArray(c.patch))
         return false;
@@ -443,6 +466,7 @@ export function isCommand(value: unknown): value is Command {
             v.tabs.length > 1 &&
             v.tabs.length <= 500 &&
             v.tabs.every(tabId) &&
+            new Set(v.tabs).size === v.tabs.length &&
             typeof v.topic === 'string' &&
             v.topic.length > 0 &&
             v.topic.length <= 80 &&

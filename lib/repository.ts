@@ -1,3 +1,4 @@
+import { isAppearancePreferences, type Appearance } from './appearance';
 import { isLibrary } from './library';
 import {
   createMetadata,
@@ -93,6 +94,11 @@ export function isMetadata(value: unknown): value is Metadata {
   )
     return false;
   if (!validateFolders(m.folders, ids)) return false;
+  if (
+    m.appearance !== undefined &&
+    !isAppearancePreferences(m.appearance, [...ids])
+  )
+    return false;
   if (m.library !== undefined && !isLibrary(m.library, ids)) return false;
   if (m.aiSettings !== undefined) {
     if (
@@ -123,6 +129,12 @@ export function isMetadata(value: unknown): value is Metadata {
       !record(a.tabClassifications) ||
       !record(a.rejectedRecommendations) ||
       !record(a.focusPreferences)
+    )
+      return false;
+    if (
+      a.dismissedCategoriesByUrl !== undefined &&
+      (!record(a.dismissedCategoriesByUrl) ||
+        !Object.values(a.dismissedCategoriesByUrl).every(strings))
     )
       return false;
     if (
@@ -231,6 +243,27 @@ export class MetadataRepository {
   get(): Promise<Metadata> {
     return this.serial(() => this.read());
   }
+  updateAppearance(
+    config: Appearance | null,
+    workspaceId?: string,
+  ): Promise<Metadata> {
+    return this.update((m) => {
+      if (workspaceId && !m.workspaces.some((w) => w.id === workspaceId))
+        throw Error('Workspace no longer exists.');
+      const appearance = {
+        ...m.appearance,
+        workspaces: { ...m.appearance?.workspaces },
+      };
+      if (workspaceId) {
+        if (config) appearance.workspaces[workspaceId] = config;
+        else delete appearance.workspaces[workspaceId];
+      } else {
+        if (config) appearance.global = config;
+        else delete appearance.global;
+      }
+      return { ...m, appearance };
+    });
+  }
   updatePreferences(patch: Partial<SidebarPreferences>): Promise<Metadata> {
     return this.update((m) => ({
       ...m,
@@ -266,6 +299,16 @@ export class MetadataRepository {
       return {
         ...m,
         workspaces: remaining,
+        appearance: m.appearance
+          ? {
+              ...m.appearance,
+              workspaces: Object.fromEntries(
+                Object.entries(m.appearance.workspaces ?? {}).filter(
+                  ([key]) => key !== id,
+                ),
+              ),
+            }
+          : undefined,
         activeWorkspaceId:
           m.activeWorkspaceId === id ? remaining[0]!.id : m.activeWorkspaceId,
       };

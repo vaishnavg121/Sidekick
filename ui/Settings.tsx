@@ -1,3 +1,5 @@
+import { AppearanceStudio } from './AppearanceStudio';
+import { useSidebar } from '../lib/store';
 import type { SidebarClient } from '../lib/client';
 import { DataSettings } from './DataSettings';
 import { useState } from 'react';
@@ -15,6 +17,7 @@ export function Settings({
   aiSettings: AiSettings;
   updateAiSettings: (patch: Partial<AiSettings>) => Promise<void>;
 }) {
+  const [studioOpen, setStudioOpen] = useState(false);
   const trusted = location.protocol === 'chrome-extension:';
   const [gatewayKey, setGatewayKey] = useState('');
   const [verifying, setVerifying] = useState(false);
@@ -45,9 +48,22 @@ export function Settings({
 
   return (
     <div className="settings-view">
-      <div className="eyebrow">MAKE YOURSELF AT HOME</div>
-      <h2>Sidebar settings</h2>
-      <p className="muted">A little space to make browsing feel lighter.</p>
+      <div className="eyebrow">PREFERENCES</div>
+      <h2>Settings</h2>
+      {useSidebar.getState().metadata && (
+        <details
+          className="appearance-entry"
+          onToggle={(event) => setStudioOpen(event.currentTarget.open)}
+        >
+          <summary>Appearance Studio</summary>
+          {studioOpen && (
+            <AppearanceStudio
+              key={useSidebar.getState().metadata?.activeWorkspaceId}
+              client={client}
+            />
+          )}
+        </details>
+      )}
       <label className="setting-label" htmlFor="sidebar-mode">
         Display mode
       </label>

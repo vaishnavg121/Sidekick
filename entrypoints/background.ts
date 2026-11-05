@@ -1,3 +1,4 @@
+import { InferenceGuard } from '../lib/ai-guard';
 import {
   ProductivityService,
   isProductivityCommand,
@@ -30,6 +31,7 @@ export default defineBackground(() => {
   const ready = chrome.storage.local.setAccessLevel({
     accessLevel: 'TRUSTED_CONTEXTS',
   });
+  const inferenceGuard = new InferenceGuard();
   const clients = new Map<chrome.runtime.Port, number>();
   const windows = new WindowStateRepository(chrome.storage.session);
   const immersive = new ImmersiveController(chrome.windows, windows, () => {
@@ -441,6 +443,9 @@ export default defineBackground(() => {
               await workspaceEngine.reorder(c.tabId, windowId, c.index);
               break;
             }
+            case 'appearance.update':
+              await repository.updateAppearance(c.config, c.workspaceId);
+              break;
             case 'preferences.update':
               if (c.patch.mode && c.patch.mode !== 'pinned')
                 await panels.setMode(windowId, c.patch.mode);
@@ -520,6 +525,24 @@ export default defineBackground(() => {
                 throw Error('Selected tabs are no longer in this workspace.');
               const target = tabs.filter((t) => c.tabIds.includes(t.id));
               const m = await repository.get();
+              const check = inferenceGuard.begin(
+                `${windowId}:${c.type}`,
+                workspaceId,
+                target,
+              );
+              const infer = async <T>(operation: Promise<T>): Promise<T> => {
+                const result = await operation;
+                check(await workspaceEngine.snapshot(windowId));
+                const currentSettings = await getAiSettings();
+                if (
+                  currentSettings.gatewayKey !== settings.gatewayKey ||
+                  !currentSettings.connected
+                )
+                  throw Error(
+                    'Gateway connection changed. Review settings before evaluating again.',
+                  );
+                return result;
+              };
               let event: ServerEvent;
               if (c.type === 'ai.classify') {
                 const accepted: Record<
@@ -532,16 +555,20 @@ export default defineBackground(() => {
                 }
                 event = {
                   type: 'ai.classify.result',
-                  classifications: await aiService.classifyTabs(
-                    target,
-                    undefined,
-                    accepted,
+                  classifications: (
+                    await infer(
+                      aiService.classifyTabs(target, undefined, accepted),
+                    )
+                  ).filter(
+                    (cls) =>
+                      !m.aiState?.dismissedCategoriesByUrl?.[
+                        target.find((t) => t.id === cls.tabId)!.url
+                      ]?.includes(cls.category),
                   ),
                 };
               } else if (c.type === 'ai.route') {
-                const recommendations = await aiService.routeTabs(
-                  target,
-                  m.workspaces,
+                const recommendations = await infer(
+                  aiService.routeTabs(target, m.workspaces),
                 );
                 event = {
                   type: 'ai.route.result',
@@ -555,15 +582,17 @@ export default defineBackground(() => {
               } else if (c.type === 'ai.group')
                 event = {
                   type: 'ai.group.result',
-                  groups: await aiService.groupTabs(target),
+                  groups: await infer(aiService.groupTabs(target)),
                 };
               else if (c.type === 'ai.cleanup')
                 event = {
                   type: 'ai.cleanup.result',
-                  suggestions: await aiService.suggestCleanup(target),
+                  suggestions: await infer(aiService.suggestCleanup(target)),
                 };
               else {
-                const relevance = await aiService.scoreFocus(target, c.goal);
+                const relevance = await infer(
+                  aiService.scoreFocus(target, c.goal),
+                );
                 const hiddenIds = relevance
                   .filter((r) => r.score < 0.5)
                   .map((r) => r.tabId);
@@ -650,6 +679,24 @@ export default defineBackground(() => {
                       [],
                     lastUpdated: new Date().toISOString(),
                   },
+                },
+              }));
+              break;
+            }
+            case 'ai.classification.reject': {
+              const { tabs } = await workspaceEngine.snapshot(windowId);
+              const tab = tabs.find((t) => t.id === c.tabId);
+              if (!tab) throw Error('Tab no longer exists in this workspace.');
+              await repository.updateAiState((ai) => ({
+                ...ai,
+                dismissedCategoriesByUrl: {
+                  ...ai.dismissedCategoriesByUrl,
+                  [tab.url]: [
+                    ...new Set([
+                      ...(ai.dismissedCategoriesByUrl?.[tab.url] ?? []),
+                      c.category,
+                    ]),
+                  ],
                 },
               }));
               break;

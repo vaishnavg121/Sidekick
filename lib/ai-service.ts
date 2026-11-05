@@ -141,13 +141,20 @@ function validateChoiceAnswer(
   if (typeof a.choice !== 'string') return null;
   if (!allowedChoices.includes(a.choice)) return null;
   const probabilities = a.probabilities as Record<string, number> | undefined;
-  if (!probabilities || typeof probabilities !== 'object') return null;
+  if (
+    !probabilities ||
+    typeof probabilities !== 'object' ||
+    Array.isArray(probabilities) ||
+    Object.keys(probabilities).some((key) => !allowedChoices.includes(key))
+  )
+    return null;
   const confidence = probabilities[a.choice];
   if (
     typeof confidence !== 'number' ||
     !Number.isFinite(confidence) ||
     confidence < 0 ||
     confidence > 1 ||
+    Object.values(probabilities).reduce((sum, p) => sum + p, 0) > 1.001 ||
     Object.values(probabilities).some(
       (p) => !Number.isFinite(p) || p < 0 || p > 1,
     )
@@ -200,6 +207,7 @@ export function sanitizeAiText(text: string): string {
 
 export class AiService {
   private gatewayKey: string | undefined;
+  private generation = 0;
   private cache = new Map<string, { result: unknown; timestamp: number }>();
   private readonly CACHE_TTL = 1000 * 60 * 30; // 30 minutes
   private readonly MAX_CONCURRENT = 2;
@@ -207,7 +215,10 @@ export class AiService {
   private queue: Array<() => Promise<unknown>> = [];
 
   setGatewayKey(key: string | undefined) {
-    if (this.gatewayKey !== key) this.clearCache();
+    if (this.gatewayKey !== key) {
+      this.clearCache();
+      this.generation++;
+    }
     this.gatewayKey = key;
   }
 
@@ -287,10 +298,72 @@ export class AiService {
       throw Error('Jev returned malformed JSON. No changes were applied.');
     })) as JevEvaluateResponse;
 
-    if (!data.answers || typeof data.answers !== 'object') {
+    if (
+      !data ||
+      typeof data !== 'object' ||
+      !data.answers ||
+      typeof data.answers !== 'object' ||
+      Array.isArray(data.answers)
+    ) {
       throw new Error('Invalid Jev response: missing answers object');
     }
 
+    const expected = Object.keys(request.questions);
+    if (Object.keys(data.answers).some((id) => !expected.includes(id)))
+      throw Error(
+        'Invalid Jev response: unexpected question IDs. No changes were applied.',
+      );
+    for (const [id, question] of Object.entries(request.questions)) {
+      const answer = data.answers[id] as unknown as
+        Record<string, unknown> | undefined;
+      const label =
+        id === 'test'
+          ? 'verification answer'
+          : id.startsWith('classify_')
+            ? 'classification'
+            : id.startsWith('focus_')
+              ? 'focus score'
+              : id.startsWith('route_')
+                ? 'workspace routing'
+                : id.startsWith('topic_')
+                  ? 'grouping'
+                  : 'cleanup';
+      let valid = !!answer && answer.type === question.type;
+      if (valid && question.type === 'boolean')
+        valid =
+          typeof answer!.probability === 'number' &&
+          Number.isFinite(answer!.probability) &&
+          Number(answer!.probability) >= 0 &&
+          Number(answer!.probability) <= 1;
+      if (valid && question.type === 'choice')
+        valid = !!validateChoiceAnswer(answer, Object.keys(question.criteria));
+      if (valid && question.type === 'score') {
+        const probabilities = answer!.probabilities;
+        valid =
+          !!validateScoreAnswer(answer) &&
+          !!probabilities &&
+          typeof probabilities === 'object' &&
+          !Array.isArray(probabilities) &&
+          Object.entries(probabilities).length > 0 &&
+          Object.values(probabilities).reduce(
+            (sum: number, p) => sum + Number(p),
+            0,
+          ) <= 1.001 &&
+          Object.entries(probabilities).every(
+            ([rung, p]) =>
+              /^\d+$/.test(rung) &&
+              Number(rung) < question.criteria.length &&
+              typeof p === 'number' &&
+              Number.isFinite(p) &&
+              p >= 0 &&
+              p <= 1,
+          );
+      }
+      if (!valid)
+        throw Error(
+          `Jev returned an invalid ${label}. No changes were applied.`,
+        );
+    }
     return data;
   }
 
@@ -329,7 +402,7 @@ export class AiService {
     const metadata = tabs
       .map((t) => `${t.id}:${t.url}:${t.title.slice(0, 50)}`)
       .join('|');
-    return `${prefix}:${metadata}${extraKey ? `:${extraKey}` : ''}`;
+    return `${this.generation}:${prefix}:${metadata}${extraKey ? `:${extraKey}` : ''}`;
   }
 
   private getFromCache<T>(key: string): T | undefined {
@@ -634,7 +707,7 @@ export class AiService {
       for (const tab of batch) {
         questions[`focus_${tab.id}`] = {
           type: 'score',
-          instructions: `Score how relevant the tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}") is to the user's focus goal: "${sanitizeAiText(goal)}". 0 = not relevant, 1 = highly relevant.`,
+          instructions: `Score how relevant the tab with ID ${tab.id} (title: "${sanitizeAiText(tab.title).slice(0, 80)}") is to the user's focus goal: "${sanitizeAiText(goal)}". Use the ordered rubric: 0 = not relevant through 5 = critically relevant. The application normalizes the returned score.`,
           criteria: [
             'not relevant',
             'slightly relevant',

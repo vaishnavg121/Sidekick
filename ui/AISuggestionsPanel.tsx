@@ -95,7 +95,7 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
           disabled={busy || !tabs.length}
           onClick={() => void organize()}
         >
-          {busy ? 'Evaluating / ' : 'Analyze workspace tabs'}
+          {busy ? 'Evaluating…' : 'Analyze workspace tabs'}
         </button>
       )}
       <form
@@ -146,9 +146,50 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
           {ai.classifications.map((c) => (
             <article className="info-card" key={c.tabId}>
               <strong>{title(c.tabId)}</strong>
+              <label className="ai-category-edit">
+                Category
+                <select
+                  aria-label={`Category for ${title(c.tabId)}`}
+                  value={c.category}
+                  onChange={(e) =>
+                    ai.setClassifications(
+                      ai.classifications.map((v) =>
+                        v.tabId === c.tabId
+                          ? {
+                              ...v,
+                              category: e.target.value as typeof c.category,
+                              confidence: 1,
+                              reasoning: 'Manually selected category',
+                            }
+                          : v,
+                      ),
+                    )
+                  }
+                >
+                  {[
+                    'Development',
+                    'Research',
+                    'Education',
+                    'Documentation',
+                    'Productivity',
+                    'Entertainment',
+                    'Shopping',
+                    'Communication',
+                    'Other',
+                  ].map((v) => (
+                    <option key={v}>{v}</option>
+                  ))}
+                </select>
+              </label>
               <p>
-                {c.category} / {Math.round(c.confidence * 100)}% selected-option
-                probability
+                {c.reasoning === 'Manually selected category' ? (
+                  'Manually selected'
+                ) : (
+                  <>
+                    {c.category} / {Math.round(c.confidence * 100)}%
+                    selected-option probability
+                  </>
+                )}
               </p>
               <button
                 className="text-button"
@@ -167,8 +208,16 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
               <button
                 className="text-button"
                 onClick={() =>
-                  ai.setClassifications(
-                    ai.classifications.filter((v) => v.tabId !== c.tabId),
+                  void run(
+                    {
+                      type: 'ai.classification.reject',
+                      tabId: c.tabId,
+                      category: c.category,
+                    },
+                    () =>
+                      ai.setClassifications(
+                        ai.classifications.filter((v) => v.tabId !== c.tabId),
+                      ),
                   )
                 }
               >
@@ -321,7 +370,7 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
           ))}
         </section>
       )}
-      {confirm && (
+      {confirm && confirm.tabIds.every((id) => liveIds.has(id)) && (
         <div
           className="info-card"
           role="group"
