@@ -1,5 +1,7 @@
 # Completion report — 5 November 2026
 
+Historical v0.2.0 record. See [current v0.3.0 results](final-polish-results.md) and [Appearance Studio](appearance.md).
+
 **Sidekick 0.2.0 is a functional personal-use beta.** The integrated source, regression tests, screenshots and release preparation are delivered together. Chrome Web Store submission, live paid requests and publisher agreements have not been performed.
 
 ## Product and technical delivery

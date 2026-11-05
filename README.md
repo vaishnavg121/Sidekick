@@ -1,8 +1,8 @@
 # Sidekick
 
-A compact, local-first Chrome workspace organizer. **0.2.0 beta** integrates logical tab workspaces, a custom left sidebar, Favorites, Pinned folders, a universal command palette, optional Jev suggestions, reminders, saved sessions, archive and portable backups.
+A compact, local-first Chrome workspace organizer. **0.3.0 beta** integrates logical tab workspaces, a custom left sidebar, Favorites, Pinned folders, a universal command palette, optional Jev suggestions, reminders, saved sessions, archive portable backups and Appearance Studio.
 
-**Status: personal-use beta.** See [acceptance results](docs/testing.md), [privacy](docs/privacy.md), [architecture](docs/architecture.md) and [store preparation](docs/release.md). No Chrome Web Store publication has been performed.
+**Status: personal-use beta.** See [current acceptance results](docs/final-polish-results.md), [privacy](docs/privacy.md), [architecture](docs/architecture.md) and [store preparation](docs/release.md). No Chrome Web Store publication has been performed.
 
 ## Install or update
 
@@ -16,7 +16,7 @@ pnpm exec playwright test
 pnpm zip
 ```
 
-At `chrome://extensions`, enable Developer mode and load `.output/chrome-mv3`. On updates, Reload the existing Sidekick card, accept Chrome's new permission prompt if shown, and refresh existing website tabs. Keep the folder and extension ID; do not uninstall or clear storage. Package: `.output/sidekick-0.2.0-chrome.zip`.
+At `chrome://extensions`, enable Developer mode and load `.output/chrome-mv3`. On updates, Reload the existing Sidekick card, accept Chrome's new permission prompt if shown, and refresh existing website tabs. Keep the folder and extension ID; do not uninstall or clear storage. Package: `.output/sidekick-0.3.0-chrome.zip`.
 
 Chrome's original New Tab is preserved. Open the dashboard from **Settings → Open Sidekick dashboard**. The toolbar button opens Chrome's native panel on restricted pages. Secure AI settings open in a dedicated extension tab.
 
@@ -57,6 +57,10 @@ Search tabs, workspaces, saved resources, bookmarks and browser actions, or type
 
 Next/previous workspace, new tab, focus tab search, organize with Jev, toggle Focus and toggle sidebar start unassigned. Settings shows actual assignments; change them at `chrome://extensions/shortcuts`. OS/Chrome conflicts can override keys. Physical accelerator dispatch remains a manual check; UI keyboard behavior is automated.
 
+## Appearance Studio
+
+Open Settings → Appearance Studio to choose seven presets or edit base/accent/secondary colors with a pointer/keyboard hue ring, saturation, brightness and hex entry. Customize solid/linear/radial fills, 2–5 gradient stops, blur, opacity, grain, borders, shadows, corners, density and motion. Changes preview inside Sidekick; Apply saves them. Workspace overrides take priority over global appearance, then existing workspace themes. Theme-only JSON export/import validates colors/ranges and rejects executable CSS. See the [full guide](docs/appearance.md).
+
 ## Optional Jev
 
 Open secure AI settings, enter your Vercel AI Gateway key and Verify & Connect. Verification makes a small potentially billable request; analysis runs when you ask. Disconnect removes the key and clears the in-memory cache. Keys stay in trusted extension storage and never appear in website/sidebar snapshots, exports or logs.
@@ -65,7 +69,7 @@ Jev (`typesafe-ai/jev`, `POST https://ai-gateway.vercel.sh/v1/evaluate`) evaluat
 
 Review categories, routes, related groups, Focus relevance and cleanup before accepting. Categories persist by URL. Routing changes actual membership; grouping creates native Chrome groups without pinning ordinary tabs. Focus preferences are workspace-specific; raw hidden IDs stay session-only. Show All/Exit Focus remains available. Cleanup requires explicit confirmation and archives URL copies first, which cannot restore unsaved forms/history.
 
-**Live inference is unverified here.** See the [user-owned-key smoke test](docs/testing.md#live-jev-smoke-test). Browser tests intercept real worker HTTP requests with deterministic responses.
+**Live inference is blocked by Gateway authentication.** The authorized local-key smoke test stopped after one rejected connection request; no inference followed. See the [feature-by-feature live report](docs/jev-live-verification.md). Deterministic Chrome tests cover HTTP contracts and accepted state changes separately. `pnpm test:live` performs no request unless `SIDEKICK_LIVE=1`; its durable 25-request campaign remains halted after authorization failure.
 
 ## Library and recovery
 
@@ -80,4 +84,4 @@ Docking cannot universally reflow arbitrary websites or change viewport/media qu
 
 Tests use disposable Chrome profiles and deterministic fixtures. Ordinary tests run headless; fullscreen/recovery run headed. `pnpm check` covers types, lint, formatting, unit tests and production build. A scoped pnpm override patches the development-only minimatch advisory without adding runtime dependencies.
 
-[Implementation ledger](docs/master-build.md) · [Architecture](docs/architecture.md) · [Testing](docs/testing.md) · [Release](docs/release.md) · [Changelog](CHANGELOG.md)
+[Current checklist](docs/final-polish-checklist.md) · [Current results](docs/final-polish-results.md) · [Historical implementation ledger](docs/master-build.md) · [Architecture](docs/architecture.md) · [Testing](docs/testing.md) · [Release](docs/release.md) · [Changelog](CHANGELOG.md)

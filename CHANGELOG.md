@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 beta — 6 November 2026
+
+- Add Appearance Studio: seven presets, accessible hue/SV/hex controls, gradients with 2–5 stops, surfaces/blur/grain/shadows, spacing/motion, live preview and explicit persistence, workspace overrides and safe theme import/export.
+- Preserve legacy metadata and installation identity. Appearance is additive and portable backups remap imported workspace themes without overwriting global preferences.
+- Refine shared design tokens, palette opening/closing/focus, compact AI review rows, manual category editing and durable dismissals. Respect reduced motion/forced colors and bound effects for legibility.
+- Fix compiled website blur: remove the vendor alias that caused the standard declaration to disappear. Zero blur uses no filter. Preserve hue/saturation intent for achromatic color editing.
+- Reject malformed/partial/unexpected AI answers and invalid probability mass. Guard changed tabs/workspaces and superseding inference before persistence; isolate caches across key changes.
+- Harden mocked browser networking, prove actual service-worker stop/recovery, real pointer dragging and hover focus retention, and add theme/AI security coverage and three visual baselines.
+- Live Gateway verification attempted once and was rejected for authorization; the campaign stopped. Native OS key dispatch remains blocked by the computer-use URL policy. No production readiness or store publication is claimed.
+
 ## 0.2.0 beta — 5 November 2026
 
 - Integrate live workspace membership, independent windows, last-active restoration and lifecycle/restart reconciliation. Fix trusted tab moves/reorder and delayed activation races.
