@@ -1,4 +1,4 @@
-/* global process, console, chrome, window */
+/* global process, console, chrome, window, setTimeout, clearTimeout */
 // Opt-in only. No Playwright traces, video, raw payloads, headers or exception dumps.
 import { chromium, expect } from '@playwright/test';
 import { readFile, writeFile, mkdtemp, rm, mkdir } from 'node:fs/promises';
@@ -8,6 +8,8 @@ import { resolve, dirname, basename } from 'node:path';
 import { tmpdir } from 'node:os';
 import assert from 'node:assert/strict';
 import { URL } from 'node:url';
+import { Buffer } from 'node:buffer';
+import { createHash } from 'node:crypto';
 
 const names = [
   'connection',
@@ -48,9 +50,33 @@ if (process.env.SIDEKICK_LIVE !== '1') {
   process.exit(0);
 }
 await mkdir('.output', { recursive: true });
-let budget = existsSync(budgetPath)
+const budget = existsSync(budgetPath)
   ? JSON.parse(await readFile(budgetPath, 'utf8'))
   : { used: 0, maximum: 25, halted: false };
+const resume = process.argv.includes('--resume');
+const accessFixed = process.argv.includes('--access-fixed');
+assert(
+  !accessFixed || (resume && budget.stopStatus === 403),
+  '--access-fixed requires an explicit resume after a recorded 403 and owner-confirmed account access correction.',
+);
+const expectedUsed = process.argv
+  .find((v) => v.startsWith('--expected-used='))
+  ?.split('=')[1];
+let probeRemaining = 0;
+assert(
+  Number.isInteger(budget.used) &&
+    budget.used >= 0 &&
+    budget.used < 25 &&
+    budget.maximum === 25,
+  'Invalid or exhausted campaign ledger.',
+);
+if (budget.halted) {
+  assert(
+    resume && expectedUsed === String(budget.used),
+    'Halted campaign: explicit --resume --expected-used=<current count> required.',
+  );
+  probeRemaining = 1;
+} else assert(!resume, 'Resume applies only to a halted campaign.');
 try {
   assert(existsSync('.env.e2e.local'));
   execFileSync('git', ['check-ignore', '--quiet', '.env.e2e.local']);
@@ -58,7 +84,22 @@ try {
   process.loadEnvFile('.env.e2e.local');
   key = process.env.AI_GATEWAY_API_KEY?.trim() ?? '';
   delete process.env.AI_GATEWAY_API_KEY;
-  assert(key && !budget.halted && budget.used < 25);
+  assert(
+    /^vck_[A-Za-z0-9_-]+$/.test(key),
+    'Local credential is not a Gateway key; no request sent.',
+  );
+  const fingerprint = createHash('sha256').update(key).digest('hex');
+  assert(
+    !budget.halted ||
+      budget.rejectedCredentialFingerprint !== fingerprint ||
+      accessFixed,
+    'This credential was already rejected. Replace it, or have the owner correct account access and explicitly attest with --access-fixed before resuming.',
+  );
+  budget.credentialFingerprint = fingerprint;
+  report.resumedFromUsed = resume ? budget.used : null;
+  report.previousStopStatus = budget.stopStatus ?? null;
+  report.ownerAttestedAccessFix = accessFixed;
+  report.responses = [];
   profile = await mkdtemp(resolve(tmpdir(), 'sidekick-live-'));
   const extension = resolve('.output/chrome-mv3');
   context = await chromium.launchPersistentContext(profile, {
@@ -124,66 +165,133 @@ try {
       targetId: target.targetId,
       flatten: false,
     });
-    cdp.on('Target.receivedMessageFromTarget', async (e) => {
+    const pending = new Map();
+    async function send(method, params) {
+      const messageId = nextId++;
+      const result = new Promise((resolve, reject) => {
+        const timer = setTimeout(() => {
+          pending.delete(messageId);
+          reject(Error('Gateway meter acknowledgement timed out.'));
+        }, 5000);
+        pending.set(messageId, { resolve, reject, timer });
+      });
+      await cdp.send('Target.sendMessageToTarget', {
+        sessionId,
+        message: JSON.stringify({ id: messageId, method, params }),
+      });
+      return result;
+    }
+    cdp.on('Target.receivedMessageFromTarget', (e) => {
       if (e.sessionId !== sessionId) return;
       const event = JSON.parse(e.message);
-      if (event.method !== 'Fetch.requestPaused') return;
-      const p = event.params;
-      if (p.responseStatusCode !== undefined) {
-        if ([401, 402, 403, 429].includes(p.responseStatusCode)) {
-          budget.halted = true;
-          budget.stopStatus = p.responseStatusCode;
-          writeFileSync(budgetPath, JSON.stringify(budget));
-        }
-        await cdp
-          .send('Target.sendMessageToTarget', {
-            sessionId,
-            message: JSON.stringify({
-              id: nextId++,
-              method: 'Fetch.continueResponse',
-              params: { requestId: p.requestId },
-            }),
-          })
-          .catch(() => {});
+      if (event.id && pending.has(event.id)) {
+        const item = pending.get(event.id);
+        clearTimeout(item.timer);
+        pending.delete(event.id);
+        if (event.error) item.reject(Error('Gateway meter command failed.'));
+        else item.resolve(event.result);
         return;
       }
-      const blocked = budget.halted || budget.used >= 25;
-      if (!blocked) {
-        budget.used++;
-        report.requestsThisRun++;
+      if (event.method !== 'Fetch.requestPaused') return;
+      void (async () => {
+        const p = event.params;
+        if (p.responseStatusCode !== undefined) {
+          const status = p.responseStatusCode;
+          const diagnostic = {
+            httpStatus: status,
+            category:
+              status === 401
+                ? 'invalid_authentication'
+                : status === 402
+                  ? 'payment_or_credit_required'
+                  : status === 403
+                    ? 'access_forbidden'
+                    : status === 429
+                      ? 'rate_or_quota_limit'
+                      : status >= 400
+                        ? 'request_or_provider_error'
+                        : 'success',
+            gatewayCode: null,
+          };
+          if (status >= 400) {
+            budget.halted = true;
+            budget.stopStatus = status;
+            budget.rejectedCredentialFingerprint = budget.credentialFingerprint;
+            writeFileSync(budgetPath, JSON.stringify(budget));
+            // Read only a fixed allowlist of public error codes. Never retain body/messages/headers.
+            try {
+              const body = await send('Fetch.getResponseBody', {
+                requestId: p.requestId,
+              });
+              const data = JSON.parse(
+                body.base64Encoded
+                  ? Buffer.from(body.body, 'base64').toString('utf8')
+                  : body.body,
+              );
+              const code = data?.error?.code ?? data?.error?.type ?? data?.type;
+              if (
+                [
+                  'invalid_api_key',
+                  'authentication_error',
+                  'invalid_request_error',
+                  'insufficient_credits',
+                  'insufficient_quota',
+                  'rate_limit_exceeded',
+                  'model_not_found',
+                  'permission_denied',
+                  'forbidden',
+                  'unauthorized',
+                  'no_providers_available',
+                  'model_not_available',
+                  'gateway_authentication_error',
+                  'gateway_permission_denied',
+                  'gateway_insufficient_credits',
+                  'gateway_rate_limit_error',
+                ].includes(code)
+              )
+                diagnostic.gatewayCode = code;
+            } catch {
+              /* No raw remote data is recorded. */
+            }
+          }
+          report.responses.push(diagnostic);
+          await send('Fetch.continueResponse', { requestId: p.requestId });
+          return;
+        }
+        const isProbe = budget.halted && probeRemaining > 0;
+        const blocked =
+          (budget.halted && !isProbe) || budget.used >= budget.maximum;
+        if (!blocked) {
+          if (isProbe) probeRemaining--;
+          budget.used++;
+          report.requestsThisRun++;
+          writeFileSync(budgetPath, JSON.stringify(budget));
+        }
+        await send(
+          blocked ? 'Fetch.failRequest' : 'Fetch.continueRequest',
+          blocked
+            ? { requestId: p.requestId, errorReason: 'BlockedByClient' }
+            : { requestId: p.requestId },
+        );
+      })().catch(() => {
+        budget.halted = true;
+        report.meterFailed = true;
         writeFileSync(budgetPath, JSON.stringify(budget));
-      }
-      await cdp
-        .send('Target.sendMessageToTarget', {
-          sessionId,
-          message: JSON.stringify({
-            id: nextId++,
-            method: blocked ? 'Fetch.failRequest' : 'Fetch.continueRequest',
-            params: blocked
-              ? { requestId: p.requestId, errorReason: 'BlockedByClient' }
-              : { requestId: p.requestId },
-          }),
-        })
-        .catch(() => {});
+        void context.close().catch(() => {});
+      });
     });
-    await cdp.send('Target.sendMessageToTarget', {
-      sessionId,
-      message: JSON.stringify({
-        id: nextId++,
-        method: 'Fetch.enable',
-        params: {
-          patterns: [
-            {
-              urlPattern: 'https://ai-gateway.vercel.sh/v1/evaluate',
-              requestStage: 'Request',
-            },
-            {
-              urlPattern: 'https://ai-gateway.vercel.sh/v1/evaluate',
-              requestStage: 'Response',
-            },
-          ],
+    // Wait for the worker acknowledgement before allowing the UI to send anything.
+    await send('Fetch.enable', {
+      patterns: [
+        {
+          urlPattern: 'https://ai-gateway.vercel.sh/*',
+          requestStage: 'Request',
         },
-      }),
+        {
+          urlPattern: 'https://ai-gateway.vercel.sh/*',
+          requestStage: 'Response',
+        },
+      ],
     });
     return target.targetId;
   }
@@ -235,6 +343,16 @@ try {
     budget.halted = true;
     throw Error('external-block');
   }
+  assert(
+    report.responses.at(-1)?.httpStatus === 200 && !report.meterFailed,
+    'Verification must have an observed HTTP 200 and validated answer.',
+  );
+  budget.halted = false;
+  delete budget.rejectedCredentialFingerprint;
+  budget.lastVerifiedAt = new Date().toISOString();
+  writeFileSync(budgetPath, JSON.stringify(budget));
+  report.authenticationSucceeded = true;
+  report.verificationSchemaMatched = true;
   report.features.connection = {
     status: 'PASS',
     live: true,
@@ -474,14 +592,7 @@ try {
     .toBe(1);
   worker = context.serviceWorkers().find((w) => w.url().includes(id));
   await lifecycle.detach();
-  // Exactly one bounded Focus batch follows restart (at most nine fixture tabs).
-  // Reserve it before the UI action; do not rely on an old worker's Fetch agent.
-  const managed = await worker.evaluate(() => chrome.tabs.query({}));
-  assert(managed.length <= 20 && !budget.halted && budget.used < 25);
-  budget.used++;
-  report.requestsThisRun++;
-  report.postRestartReservedRequests = 1;
-  writeFileSync(budgetPath, JSON.stringify(budget));
+  await meter();
   assert.equal(JSON.stringify((await metadata()).aiState), saved);
   for (const feature of Object.values(report.features))
     if (feature.persisted) feature.restart = true;
@@ -540,7 +651,9 @@ try {
         : 'FAIL';
   report.stage = stage;
   report.reason ??=
-    'Check failed at the named stage; no raw error or credential was recorded.';
+    stage === 'setup'
+      ? 'Local credential or resume preflight rejected; no request sent.'
+      : 'Check failed at the named stage; no raw error or credential was recorded.';
 } finally {
   await context?.close().catch(() => {});
   if (
@@ -552,7 +665,8 @@ try {
     await rm(profile, { recursive: true, force: true });
   await writeFile(budgetPath, JSON.stringify(budget, null, 2));
   report.totalRequestsInBudget = budget.used;
+  report.stopStatus = budget.stopStatus ?? null;
   await writeFile(reportPath, JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report));
-  if (report.status === 'FAIL') process.exitCode = 1;
+  if (report.status !== 'PASS') process.exitCode = 1;
 }

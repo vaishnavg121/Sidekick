@@ -85,3 +85,5 @@ Docking cannot universally reflow arbitrary websites or change viewport/media qu
 Tests use disposable Chrome profiles and deterministic fixtures. Ordinary tests run headless; fullscreen/recovery run headed. `pnpm check` covers types, lint, formatting, unit tests and production build. A scoped pnpm override patches the development-only minimatch advisory without adding runtime dependencies.
 
 [Current checklist](docs/final-polish-checklist.md) · [Current results](docs/final-polish-results.md) · [Historical implementation ledger](docs/master-build.md) · [Architecture](docs/architecture.md) · [Testing](docs/testing.md) · [Release](docs/release.md) · [Changelog](CHANGELOG.md)
+
+Gateway authentication follow-up: the updated local key received **HTTP 403** on its single authorized retry. Campaign halted at **2/25**; all five live Jev workflows remain blocked. [Current diagnosis and safe resume](docs/jev-authentication-followup.md).
