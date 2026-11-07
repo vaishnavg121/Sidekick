@@ -400,15 +400,20 @@ export function isCommand(value: unknown): value is Command {
             Number.isFinite(v),
       );
     }
-    case 'ai.settings.update':
+    case 'ai.settings.update': {
+      if (!c.patch || typeof c.patch !== 'object' || Array.isArray(c.patch))
+        return false;
+      const p = c.patch as Record<string, unknown>;
+      const provider =
+        p.provider ?? (Object.hasOwn(p, 'gatewayKey') ? 'vercel' : 'typesafe');
+      const field = provider === 'typesafe' ? 'typesafeKey' : 'gatewayKey';
       return (
-        !!c.patch &&
-        typeof c.patch === 'object' &&
-        !Array.isArray(c.patch) &&
-        Object.keys(c.patch).length === 1 &&
-        typeof (c.patch as Record<string, unknown>).gatewayKey === 'string' &&
-        String((c.patch as Record<string, unknown>).gatewayKey).length <= 1000
+        ['typesafe', 'vercel'].includes(String(provider)) &&
+        Object.keys(p).every((k) => k === 'provider' || k === field) &&
+        typeof p[field] === 'string' &&
+        String(p[field]).length <= 1000
       );
+    }
     case 'ai.classify':
     case 'ai.route':
     case 'ai.group':

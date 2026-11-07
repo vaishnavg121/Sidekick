@@ -324,6 +324,7 @@ try {
   stage = 'connection';
   await expect(page.getByText('Not connected', { exact: true })).toBeVisible();
   // Trusted options only. The value is never placed in a website/content script.
+  await page.getByLabel('AI provider', { exact: true }).selectOption('vercel');
   await page.getByLabel('Vercel AI Gateway API key').fill(key);
   report.features.connection.live = true;
   await page.getByRole('button', { name: 'Verify & Connect' }).click();

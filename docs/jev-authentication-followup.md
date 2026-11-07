@@ -1,3 +1,5 @@
+> Historical 0.3.0 evidence. The [0.4.0 TypeSafe Direct results](typesafe-release-candidate.md) supersede the Gateway-only blocking status; original reports remain preserved.
+
 # Gateway authentication follow-up — 6 November 2026
 
 The original local file loaded correctly but contained a template value. After the credential owner replaced it and explicitly requested a retry, an isolated Chrome profile performed **one** verification request through Sidekick's trusted options UI, background service and the real Gateway endpoint. The replacement has the documented Gateway-key format and its masked suffix matches an active key listed in the signed-in team. The dashboard also showed recent use and no key budget. This is evidence of the intended credential type/team, not successful Jev authorization.

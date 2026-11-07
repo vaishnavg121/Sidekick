@@ -20,13 +20,30 @@ export function Settings({
   const [studioOpen, setStudioOpen] = useState(false);
   const trusted = location.protocol === 'chrome-extension:';
   const [gatewayKey, setGatewayKey] = useState('');
+  const [provider, setProvider] = useState<import('../lib/models').AiProvider>(
+    aiSettings.provider ?? 'typesafe',
+  );
+  const direct = provider === 'typesafe';
+  const selectedStatus =
+    provider === (aiSettings.provider ?? 'typesafe')
+      ? aiSettings.status
+      : 'disconnected';
+  const providerName = direct ? 'TypeSafe Direct' : 'Vercel AI Gateway';
+  const keyUrl = direct
+    ? 'https://console.typesafe.ai'
+    : 'https://vercel.com/ai-gateway';
   const [verifying, setVerifying] = useState(false);
   const [showKey, setShowKey] = useState(false);
   const handleVerify = async () => {
     if (!gatewayKey.trim()) return;
     setVerifying(true);
     try {
-      await updateAiSettings({ gatewayKey: gatewayKey.trim() });
+      await updateAiSettings({
+        provider,
+        ...(direct
+          ? { typesafeKey: gatewayKey.trim() }
+          : { gatewayKey: gatewayKey.trim() }),
+      });
       setGatewayKey('');
     } catch {
       // Error is handled by the background and reflected in aiSettings
@@ -36,7 +53,10 @@ export function Settings({
   };
 
   const handleRemoveKey = async () => {
-    await updateAiSettings({ gatewayKey: '' });
+    await updateAiSettings({
+      provider,
+      ...(direct ? { typesafeKey: '' } : { gatewayKey: '' }),
+    });
   };
 
   const statusColors = {
@@ -140,7 +160,7 @@ export function Settings({
       <div className="eyebrow">AI TAB ORGANIZATION</div>
       <h2>Intelligent features</h2>
       <p className="muted">
-        Connect your Vercel AI Gateway key to enable Jev-powered tab
+        Connect your TypeSafe Direct key to enable Jev-powered tab
         classification, workspace routing, smart grouping, focus filtering, and
         cleanup suggestions.
       </p>
@@ -152,23 +172,45 @@ export function Settings({
           Open secure AI settings
         </button>
       )}
+      <label>
+        AI provider
+        <select
+          aria-label="AI provider"
+          value={provider}
+          disabled={verifying}
+          onChange={(e) => {
+            setProvider(e.target.value as import('../lib/models').AiProvider);
+            setGatewayKey('');
+            setShowKey(false);
+          }}
+        >
+          <option value="typesafe">TypeSafe Direct · jev-latest</option>
+          <option value="vercel">Vercel AI Gateway · legacy</option>
+        </select>
+      </label>
+      <p className="field-note">
+        {direct
+          ? 'TypeSafe Direct · jev-latest'
+          : 'Vercel AI Gateway · typesafe-ai/jev'}
+        . No automatic provider fallback.
+      </p>
       <div className="ai-settings-card">
         <div className="ai-status-row">
-          <span className="ai-status-label">Vercel AI Gateway</span>
+          <span className="ai-status-label">{providerName}</span>
           <span
             className="ai-status-badge"
-            style={{ backgroundColor: statusColors[aiSettings.status] }}
+            style={{ borderColor: statusColors[selectedStatus] }}
           >
-            {aiSettings.status === 'connected'
+            {selectedStatus === 'connected'
               ? 'Connected'
-              : aiSettings.status === 'connecting'
+              : selectedStatus === 'connecting'
                 ? 'Verifying…'
-                : aiSettings.status === 'error'
+                : selectedStatus === 'error'
                   ? `Error: ${aiSettings.lastError ?? 'Unknown'}`
                   : 'Not connected'}
           </span>
         </div>
-        {trusted && aiSettings.status !== 'connected' && (
+        {trusted && selectedStatus !== 'connected' && (
           <div className="ai-key-input">
             <label>
               API Key
@@ -177,8 +219,8 @@ export function Settings({
                   type={showKey ? 'text' : 'password'}
                   value={gatewayKey}
                   onChange={(e) => setGatewayKey(e.target.value)}
-                  placeholder="sk-…"
-                  aria-label="Vercel AI Gateway API key"
+                  placeholder={direct ? 'TypeSafe API key' : 'vck_…'}
+                  aria-label={`${providerName} API key`}
                   disabled={verifying}
                 />
                 <button
@@ -204,12 +246,8 @@ export function Settings({
               </button>
               <p className="field-note ai-key-note">
                 Get your key at{' '}
-                <a
-                  href="https://vercel.com/ai-gateway"
-                  target="_blank"
-                  rel="noopener"
-                >
-                  vercel.com/ai-gateway
+                <a href={keyUrl} target="_blank" rel="noopener">
+                  {direct ? 'console.typesafe.ai' : 'vercel.com/ai-gateway'}
                 </a>
                 . Usage may incur provider charges. Sidekick never stores your
                 key outside this browser.
@@ -217,10 +255,13 @@ export function Settings({
             </div>
           </div>
         )}
-        {trusted && aiSettings.status === 'connected' && (
+        {trusted && selectedStatus === 'connected' && (
           <div className="ai-connected-actions">
             <p className="field-note">
-              Last verified:{' '}
+              Model:{' '}
+              {aiSettings.lastModel ??
+                (direct ? 'jev-latest' : 'typesafe-ai/jev')}
+              . Last verified:{' '}
               {aiSettings.lastVerified
                 ? new Date(aiSettings.lastVerified).toLocaleString()
                 : 'Unknown'}
@@ -234,19 +275,15 @@ export function Settings({
             </p>
           </div>
         )}
-        {aiSettings.status === 'error' && (
-          <div className="ai-error">
+        {selectedStatus === 'error' && (
+          <div className="ai-error" role="alert">
             <p className="field-note" style={{ color: 'var(--danger)' }}>
               Connection failed: {aiSettings.lastError}
             </p>
             <p className="field-note ai-key-note">
               Check your key at{' '}
-              <a
-                href="https://vercel.com/ai-gateway"
-                target="_blank"
-                rel="noopener"
-              >
-                vercel.com/ai-gateway
+              <a href={keyUrl} target="_blank" rel="noopener">
+                {direct ? 'console.typesafe.ai' : 'vercel.com/ai-gateway'}
               </a>
               and try again. Rate limits or network issues may cause temporary
               failures.

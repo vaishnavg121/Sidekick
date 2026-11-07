@@ -87,7 +87,7 @@ test.beforeEach(async ({ browserName }, info) => {
     headless: info.project.use.headless !== false,
     viewport: { width: 1280, height: 900 },
     args: [
-      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND',
+      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND, MAP api.typesafe.ai ~NOTFOUND',
       `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`,
     ],
@@ -408,7 +408,7 @@ test('Master recovery: full browser restart reconciles fresh Chrome handles with
     viewport: { width: 1280, height: 900 },
     args: [
       '--restore-last-session',
-      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND',
+      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND, MAP api.typesafe.ai ~NOTFOUND',
       `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`,
     ],
@@ -630,9 +630,10 @@ test('Master acceptance: trusted AI key boundary, mocked real HTTP contract, rou
     }),
   });
   await page.goto(`chrome-extension://${extensionId}/options.html`);
+  await page.getByLabel('AI provider', { exact: true }).selectOption('vercel');
   await page
     .getByLabel('Vercel AI Gateway API key')
-    .fill('isolated-contract-test-key');
+    .fill('vck_isolated-contract-test-key');
   await page.getByRole('button', { name: 'Verify & Connect' }).click();
   await expect(page.getByText('Connected', { exact: true })).toBeVisible();
   await page.goto(`chrome-extension://${extensionId}/dashboard.html`);
@@ -689,7 +690,9 @@ test('Master acceptance: trusted AI key boundary, mocked real HTTP contract, rou
     .toBe(1);
   await expect(ui.getByText('Closed tab', { exact: true })).toHaveCount(0);
   expect(messages.length).toBeGreaterThan(1);
-  expect(JSON.stringify(messages)).not.toContain('isolated-contract-test-key');
+  expect(JSON.stringify(messages)).not.toContain(
+    'vck_isolated-contract-test-key',
+  );
   const snapshot = await page.evaluate(async () => {
     return new Promise<string>((resolve) => {
       const port = chrome.runtime.connect({ name: 'sidekick:sidebar:v1' });
@@ -704,7 +707,7 @@ test('Master acceptance: trusted AI key boundary, mocked real HTTP contract, rou
         .then((w) => port.postMessage({ type: 'subscribe', windowId: w.id }));
     });
   });
-  expect(snapshot).not.toContain('isolated-contract-test-key');
+  expect(snapshot).not.toContain('vck_isolated-contract-test-key');
   await page.screenshot({
     animations: 'disabled',
     path: 'test-results/master-ai.png',

@@ -1,6 +1,6 @@
-# Release preparation — 0.3.0 beta
+# Release preparation — 0.4.0 release candidate
 
-Prepared 6 November 2026. Classification: **functional personal-use beta**, with completed automated acceptance evidence and remaining device/live-service gates in [current testing](final-polish-results.md). No store publication or payment has been performed or authorized.
+Prepared 7 November 2026. Classification: **release candidate for owner manual testing**, with completed automated acceptance evidence and remaining device/live-service gates in [current testing](typesafe-release-candidate.md). No store publication or payment has been performed or authorized.
 
 ## Reproduce and package
 
@@ -13,7 +13,7 @@ pnpm audit
 pnpm zip
 ```
 
-Load `.output/chrome-mv3`, or extract `.output/sidekick-0.3.0-chrome.zip` into a dedicated folder and load that folder with Developer mode. Keep the existing extension ID/path when updating to retain user storage. Refresh old website content scripts after Reload. The 0.3.0 update adds no permission relative to 0.2.0; optional notifications remain a separate user choice.
+Load `.output/chrome-mv3`, or extract `.output/sidekick-0.4.0-chrome.zip` into a dedicated folder and load that folder with Developer mode. Keep the existing extension ID/path when updating to retain user storage. Refresh old website content scripts after Reload. The 0.4.0 update adds the official TypeSafe host permission; accept Chrome's permission prompt when updating. Optional notifications remain a separate user choice.
 
 The MV3 manifest contains no New Tab override, remote code, unsafe evaluation, cookies/history/debugger/scripting/webRequest permission or persistent background page. Options open in a trusted extension tab. Existing strict storage access and sender/window validation remain enabled.
 
@@ -31,9 +31,9 @@ Sidekick brings a compact workspace sidebar to everyday Chrome browsing. Keep li
 
 Choose Hover, Hidden, custom Docked or native-panel fallback. Docking adjusts compatible pages conservatively and offers Hover on unsupported layouts. Chrome's original New Tab remains unchanged; the Sidekick dashboard is opened explicitly.
 
-Remind yourself about a tab with snoozing, save URL sessions, keep an archive and export portable backups. Optional Jev analysis uses your own Vercel AI Gateway key for reviewed categories, routing, related groups, Focus relevance and cleanup suggestions. AI is not required for ordinary browsing or search. Requests may incur provider charges.
+Remind yourself about a tab with snoozing, save URL sessions, keep an archive and export portable backups. Optional Jev analysis uses your own TypeSafe Direct key for reviewed categories, routing, related groups, Focus relevance and cleanup suggestions. AI is not required for ordinary browsing or search. Requests may incur provider charges.
 
-Workspaces share this Chrome profile's cookies/accounts. Restores reopen URLs, not unsaved forms or complete page history. Physical shortcut conflicts, incognito/enterprise restrictions and complex website layouts may require manual checks. This version is labelled beta; do not market it as universally compatible or production approved.
+Workspaces share this Chrome profile's cookies/accounts. Restores reopen URLs, not unsaved forms or complete page history. Physical shortcut conflicts, incognito/enterprise restrictions and complex website layouts may require manual checks. This version is a release candidate; do not market it as universally compatible or production approved.
 
 **Category/language suggestion:** Productivity / English. Publisher must confirm the currently offered dashboard category.
 
@@ -47,7 +47,8 @@ Workspaces share this Chrome profile's cookies/accounts. Restores reopen URLs, n
 | bookmarks                        | Read-only tree/search/opening in the sidebar/palette                                                             |
 | alarms                           | Recreate/wake durable snooze reminders under MV3 suspension                                                      |
 | tabGroups                        | Create/name native groups after explicit Jev acceptance, and display existing groups                             |
-| `https://ai-gateway.vercel.sh/*` | User-enabled BYOK evaluation requests to one fixed HTTPS endpoint                                                |
+| `https://api.typesafe.ai/*`      | Direct model discovery and user-enabled Jev requests with the TypeSafe key                                       |
+| `https://ai-gateway.vercel.sh/*` | Explicit legacy-provider requests with the separate Gateway key                                                  |
 | HTTP/HTTPS content matches       | Custom sidebar and reversible docking on ordinary pages, excluding the Web Store                                 |
 | notifications (optional)         | OS reminder notification only after user grant                                                                   |
 
@@ -55,7 +56,7 @@ Workspaces share this Chrome profile's cookies/accounts. Restores reopen URLs, n
 
 Public policy: [repository privacy page](https://github.com/vaishnavg121/Sidekick/blob/main/docs/privacy.md). Confirm this URL is live and accepted by the publisher dashboard before submission.
 
-Disclose actual browsing-title/URL access, optional user-provided workspace/email/Focus information, local saved resources and optional Gateway authentication. Do not select a blanket “no data access” statement. Explain that selected sanitized titles/domains, workspace names and goals go to Vercel only when AI is requested, while keys are used for HTTPS authentication. No telemetry/advertising/sale of data or remotely hosted executable code is implemented. Publisher must review/certify the dashboard's current data-use checkboxes and provider terms; the repository does not certify an account on their behalf.
+Disclose actual browsing-title/URL access, optional user-provided workspace/email/Focus information, local saved resources and optional selected-provider authentication. Do not select a blanket “no data access” statement. Explain that selected sanitized titles/domains, workspace names and goals go to the selected TypeSafe/legacy Vercel provider only when AI is requested, while keys are used for HTTPS authentication. No telemetry/advertising/sale of data or remotely hosted executable code is implemented. Publisher must review/certify the dashboard's current data-use checkboxes and provider terms; the repository does not certify an account on their behalf.
 
 ## Assets
 
@@ -76,12 +77,12 @@ Reviewed primary references: [Program policies](https://developer.chrome.com/doc
 
 Do not claim Chrome Web Store approval or complete production readiness from a successful local build.
 
-## 0.3.0 delivery notes
+## 0.4.0 delivery notes
 
-Appearance Studio and validated local theme portability add no runtime dependencies or permissions relative to v0.2.0. The original Chrome New Tab and extension identity remain unchanged. Same-path upgrade testing preserves workspaces, resource/folder IDs, preferences, sessions, archive and snoozed reminders.
+TypeSafe Direct is now primary and all five live workflows passed. The legacy Vercel campaign stays preserved and halted. Two separate fixed provider hosts are justified by explicit selection, with no credential forwarding or paid fallback. No runtime dependency or storage schema reset was added.
 
-Live Jev is blocked by the actual authorization rejection, not by a missing test file. The campaign remains halted after one request. Physical OS input was stopped by the computer-use tool because it could not establish the browser URL confidently enough for policy enforcement. No physical key was sent. Mocked HTTP/UI checks and Chrome command registration are separate evidence.
+Live captures and mocked contract images are identified separately in `docs/screenshots/typesafe/`. These are development evidence; select/re-capture store-compatible assets after the owner's manual refinement pass. The original live fixture captures contain a diagnosed charset issue fixed in the runner. Do not upload them as polished store assets without review.
 
-Current screenshots live in `docs/screenshots/polish/`; inspect selected 1280×800 assets before submitting. The 1366×768/1920×1080/520px diagnostic captures are layout evidence and may need store-compatible capture sizes. Listing/privacy review, valid live Jev verification, device checks and explicit publication authorization remain submission gates. No store upload, payment or publisher agreement was performed.
+See [the current report](typesafe-release-candidate.md) for the final ZIP checksum, counters, complete acceptance table and limitations. No store upload, payment, auto top-up or publisher agreement was performed. The original New Tab is unchanged; same-path upgrade keeps local identity/data.
 
-Verified final ZIP: `.output/sidekick-0.3.0-chrome.zip`, **256,213 bytes**, SHA-256 `14bbee682d754782ded92d2474180f85b001143c9cb32cc48ea559cbe78d0d67`. Final gate: **177 unit tests / 18 files, 46 Chrome scenarios, 3 embedded pixel comparisons passed**. Fresh extracted-ZIP installation and same-ID upgrade passed. See [the complete results and 40-step ledger](final-polish-results.md).
+Verified local release ZIP: `.output/sidekick-0.4.0-chrome.zip`, **258,420 bytes**; SHA-256 `3ace5e90e4d8bcd2dd046c2b95f112dbb144a10c78b1d06f5f99917f83480e9a`. Static/build gate: **228 unit tests / 21 files**. Full Chrome: **48/48**, three embedded pixel comparisons; two Direct cases rerun after final badge styling. Extracted install and same-ID upgrades from 0.3.0 and 0.2.0 passed. Both local keys were privately compared without disclosure; no scan finding or dependency advisory remained. [Complete results](typesafe-release-candidate.md).

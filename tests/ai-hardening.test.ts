@@ -16,7 +16,7 @@ const tabs: TabItem[] = [
 ];
 const service = () => {
   const s = new AiService();
-  s.setGatewayKey('fixture-not-a-live-key');
+  s.setGatewayKey('vck_fixture-not-a-live-key');
   return s;
 };
 const response = (data: unknown) => ({ ok: true, json: async () => data });
@@ -30,11 +30,11 @@ describe('strict authenticated decision boundaries', () => {
         vi.fn().mockResolvedValue({
           ok: false,
           status,
-          json: async () => ({ error: 'fixture-not-a-live-key' }),
+          json: async () => ({ error: 'vck_fixture-not-a-live-key' }),
         }),
       );
       await expect(service().classifyTabs(tabs)).rejects.not.toThrow(
-        'fixture-not-a-live-key',
+        'vck_fixture-not-a-live-key',
       );
     },
   );
@@ -84,7 +84,7 @@ describe('strict authenticated decision boundaries', () => {
       vi.fn().mockResolvedValue({
         ok: true,
         json: async () => {
-          throw Error('fixture-not-a-live-key');
+          throw Error('vck_fixture-not-a-live-key');
         },
       }),
     );
@@ -93,7 +93,7 @@ describe('strict authenticated decision boundaries', () => {
     );
     vi.stubGlobal(
       'fetch',
-      vi.fn().mockRejectedValue(Error('fixture-not-a-live-key')),
+      vi.fn().mockRejectedValue(Error('vck_fixture-not-a-live-key')),
     );
     await expect(service().classifyTabs(tabs)).rejects.toThrow('timed out');
   });
@@ -163,7 +163,7 @@ describe('strict authenticated decision boundaries', () => {
     vi.stubGlobal('fetch', fetchMock);
     const s = service();
     const pending = s.classifyTabs(tabs);
-    s.setGatewayKey('different-fixture-key');
+    s.setGatewayKey('vck_different-fixture-key');
     finish(
       response({
         answers: {

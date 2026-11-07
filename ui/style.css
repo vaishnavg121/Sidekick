@@ -2899,3 +2899,17 @@ body,
   font-size: 11px;
   margin: 6px 0 10px;
 }
+
+.ai-status-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.ai-status-badge {
+  border: 1px solid var(--border);
+  color: var(--text);
+  padding: 2px 7px;
+  border-radius: 6px;
+}

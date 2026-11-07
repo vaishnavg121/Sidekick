@@ -10,11 +10,14 @@ const ignored =
     encoding: 'utf8',
   }).trim() === '.env.e2e.local';
 if (!ignored) throw Error('Local live-test credentials must remain ignored.');
-const key = existsSync('.env.e2e.local')
-  ? parseEnv(
-      await readFile('.env.e2e.local', 'utf8'),
-    ).AI_GATEWAY_API_KEY?.trim()
-  : undefined;
+const secrets = existsSync('.env.e2e.local')
+  ? Object.entries(parseEnv(await readFile('.env.e2e.local', 'utf8')))
+      .filter(([name]) =>
+        ['AI_GATEWAY_API_KEY', 'TYPESAFE_API_KEY'].includes(name),
+      )
+      .map(([, value]) => value.trim())
+      .filter(Boolean)
+  : [];
 const tracked = execFileSync(
   'git',
   ['ls-files', '--cached', '--others', '--exclude-standard', '-z'],
@@ -51,7 +54,7 @@ for (const file of [
   if (!existsSync(file)) continue;
   const data = await readFile(file);
   count++;
-  if (key && data.includes(Buffer.from(key)))
+  if (secrets.some((key) => data.includes(Buffer.from(key))))
     throw Error(
       'Credential found in an audited file. No credential was printed.',
     );
@@ -74,7 +77,7 @@ const report = {
   status: 'PASS',
   filesScanned: count,
   credentialFileIgnored: true,
-  localCredentialComparedWithoutDisclosure: !!key,
+  localCredentialComparedWithoutDisclosure: secrets.length > 0,
   noCredentialFound: true,
   noTestCredentialsOrLoopbackEndpointsInBuild: true,
 };

@@ -1,7 +1,7 @@
 {
   "name": "sidekick",
   "private": true,
-  "version": "0.3.0",
+  "version": "0.4.0",
   "type": "module",
   "packageManager": "pnpm@11.20.0",
   "engines": {
@@ -20,7 +20,8 @@
     "test:browser": "playwright test --project=chrome",
     "test:browser:headed": "playwright test --project=chrome-headed",
     "check": "pnpm typecheck && pnpm lint && pnpm format:check && pnpm test && pnpm build",
-    "test:live": "node scripts/live-jev.mjs"
+    "test:live": "node scripts/live-typesafe.mjs",
+    "test:live:gateway": "node scripts/live-jev.mjs"
   },
   "dependencies": {
     "react": "^19.3.1",

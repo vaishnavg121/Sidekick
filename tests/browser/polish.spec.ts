@@ -89,7 +89,7 @@ test.beforeEach(async ({ browserName }, info) => {
     headless: info.project.use.headless !== false,
     viewport: { width: 1280, height: 900 },
     args: [
-      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND',
+      '--host-resolver-rules=MAP ai-gateway.vercel.sh ~NOTFOUND, MAP api.typesafe.ai ~NOTFOUND',
       `--disable-extensions-except=${extension}`,
       `--load-extension=${extension}`,
     ],
@@ -545,9 +545,10 @@ test('Folder drag hover expands at 800ms and cancels on leave, drop and drag end
 
 async function connectMock() {
   await page.goto(`chrome-extension://${extensionId}/options.html`);
+  await page.getByLabel('AI provider', { exact: true }).selectOption('vercel');
   await page
     .getByLabel('Vercel AI Gateway API key')
-    .fill('isolated-mock-contract-key');
+    .fill('vck_isolated-mock-contract-key');
   await page
     .getByRole('button', { name: 'Verify & Connect', exact: true })
     .click();
@@ -953,7 +954,7 @@ test('Jev worker restart during inference preserves data and a new mocked UI ope
     globalThis.fetch = async (_input, init) => {
       if (
         new Headers(init?.headers).get('Authorization') !==
-        'Bearer isolated-mock-contract-key'
+        'Bearer vck_isolated-mock-contract-key'
       )
         throw Error('Fixture key was not restored');
       const body = JSON.parse(String(init?.body));

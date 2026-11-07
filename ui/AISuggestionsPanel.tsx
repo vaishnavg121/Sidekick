@@ -75,13 +75,21 @@ export function AISuggestionsPanel({ client }: { client: SidebarClient }) {
       <div className="eyebrow">OPTIONAL INTELLIGENCE</div>
       <h2>Organize with Jev</h2>
       <p className="field-note">
+        {metadata?.aiSettings?.provider === 'vercel'
+          ? 'Vercel AI Gateway · typesafe-ai/jev'
+          : `TypeSafe Direct · ${metadata?.aiSettings?.lastModel ?? 'jev-latest'}`}
+      </p>
+      <p className="field-note">
         Review every suggestion before applying. Selected titles and domains,
-        workspace names and your focus goal go to Vercel. Page content and full
-        URLs stay here. Jev returns decisions, not generated explanations.
+        workspace names and your focus goal go to your selected AI provider.
+        Page content and full URLs stay here. Jev returns decisions, not
+        generated explanations.
       </p>
       {metadata?.aiSettings?.status !== 'connected' ? (
         <>
-          <p>Connect your own Gateway key in secure settings to use Jev.</p>
+          <p>
+            Connect your own TypeSafe Direct key in secure settings to use Jev.
+          </p>
           <button
             className="text-button"
             onClick={() => void run({ type: 'settings.open' })}
