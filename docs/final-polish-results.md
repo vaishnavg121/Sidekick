@@ -1,3 +1,5 @@
+> Historical 0.3.0 evidence. The [0.4.0 TypeSafe Direct results](typesafe-release-candidate.md) supersede the Gateway-only blocking status; original reports remain preserved.
+
 # Final polish results — 6 November 2026
 
 **Classification: functional personal-use beta, version 0.3.0.** Local workspace/resource management, Appearance Studio and the reviewed AI integration are implemented. All final automated gates pass. Live Jev authorization and physical device checks remain blocked or untested, so this is not a production-ready or store-approved release.

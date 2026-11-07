@@ -1,3 +1,5 @@
+> Historical 0.3.0 evidence. The [0.4.0 TypeSafe Direct results](typesafe-release-candidate.md) supersede the Gateway-only blocking status; original reports remain preserved.
+
 # Jev verification — initial 5 November 2026 campaign
 
 **6 November follow-up:** after the credential was replaced and retry explicitly authorized, one additional verification returned HTTP 403. Campaign now halted at **2/25**, all five live workflows still BLOCKED. See [the current diagnosis and explicit resume procedure](jev-authentication-followup.md). The original findings below are historical.

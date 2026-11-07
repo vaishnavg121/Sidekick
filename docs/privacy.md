@@ -1,6 +1,6 @@
 # Privacy and data handling
 
-Effective 6 November 2026 · Sidekick 0.3.0 beta
+Effective 7 November 2026 · Sidekick 0.4.0 release candidate
 
 Sidekick organizes tabs in your existing Chrome profile. It does not isolate cookies, accounts, passwords or browser profiles.
 
@@ -14,11 +14,11 @@ Chrome bookmarks are read for display/search/opening and are not changed. The co
 
 ## Optional network requests
 
-AI is optional. Verify & Connect sends a small verification request to Vercel AI Gateway. User-requested analysis sends sanitized selected titles/domains, question IDs, workspace names and Focus goals to `https://ai-gateway.vercel.sh/v1/evaluate` using `typesafe-ai/jev`.
+AI is optional. TypeSafe Direct is the default provider. Verify & Connect sends authenticated model discovery to `https://api.typesafe.ai/v1/models`, then one small Noul request to `https://api.typesafe.ai/v1/systemone` using `jev-latest`. User-requested analysis sends sanitized selected titles/domains, question IDs, workspace names and Focus goals. Legacy Vercel is separately selectable and uses `https://ai-gateway.vercel.sh/v1/evaluate` with its own Gateway key. There is no automatic fallback or cross-provider credential forwarding.
 
-URL paths, queries, fragments, page contents, cookies and passwords are not intentionally sent in AI requests. Titles/goals can contain sensitive information; automated sanitization cannot recognize every secret. Choose what you analyze carefully. Vercel/provider processing, retention and billing follow their terms; Sidekick does not guarantee zero external retention.
+URL paths, queries, fragments, page contents, cookies and passwords are not intentionally sent in AI requests. Titles/goals can contain sensitive information; automated sanitization cannot recognize every secret. Provider processing, retention and billing follow their terms; Sidekick does not guarantee zero external retention.
 
-Your Gateway key is stored in trusted local extension storage and sent as an HTTPS authorization header only to the fixed endpoint. It is not broadcast to content scripts, logged or exported. Disconnect removes the configured key and clears in-memory results. Local browser/device access can expose extension storage; no encrypted-at-rest guarantee is made.
+Provider keys are stored in trusted local extension storage and sent as HTTPS authorization headers only to the chosen fixed provider host. They are not broadcast to content scripts, logged or exported. Connected provider identity, resolved verification model/date and public connection status may appear in snapshots; credentials are explicitly excluded. Disconnect removes that provider's key and clears in-memory results. Other provider credentials remain dormant until explicitly selected/reverified or removed. Local browser/device access can expose extension storage; no encrypted-at-rest guarantee is made.
 
 Favicons can contact the corresponding origin using Chrome-provided/saved icon URLs or a favicon endpoint, with a no-referrer policy. Opening/searching contacts the destination normally. No analytics or telemetry service is included, and no remotely hosted code is executed.
 
@@ -34,17 +34,17 @@ Individual resources and Library entries can be removed through the UI. Workspac
 
 ## Permissions
 
-| Permission/access          | Purpose                                                 |
-| -------------------------- | ------------------------------------------------------- |
-| storage                    | Local metadata, settings and session state              |
-| tabs                       | Live titles/URLs, navigation, ownership and tab actions |
-| sidePanel                  | Supported fallback on restricted Chrome pages           |
-| bookmarks                  | Read-only bookmark browsing/search/opening              |
-| alarms                     | MV3 reminder scheduling                                 |
-| tabGroups                  | Native groups explicitly accepted from Jev              |
-| Gateway host               | Fixed HTTPS AI requests                                 |
-| HTTP/HTTPS content matches | Sidebar and reversible docking on permitted pages       |
-| notifications (optional)   | Due reminder notifications after permission grant       |
+| Permission/access                 | Purpose                                                 |
+| --------------------------------- | ------------------------------------------------------- |
+| storage                           | Local metadata, settings and session state              |
+| tabs                              | Live titles/URLs, navigation, ownership and tab actions |
+| sidePanel                         | Supported fallback on restricted Chrome pages           |
+| bookmarks                         | Read-only bookmark browsing/search/opening              |
+| alarms                            | MV3 reminder scheduling                                 |
+| tabGroups                         | Native groups explicitly accepted from Jev              |
+| TypeSafe and legacy Gateway hosts | Fixed HTTPS requests to the explicitly chosen provider  |
+| HTTP/HTTPS content matches        | Sidebar and reversible docking on permitted pages       |
+| notifications (optional)          | Due reminder notifications after permission grant       |
 
 No history, cookies, debugger, scripting, webRequest, clipboard-read or password permission is requested. Contact/support: [Sidekick issues](https://github.com/vaishnavg121/Sidekick/issues). Never post keys or private browsing data in public issues.
 

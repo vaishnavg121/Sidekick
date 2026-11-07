@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.4.0 release candidate — 7 November 2026
+
+- Make TypeSafe Direct (`jev-latest`) the default Jev provider; retain existing Vercel settings as a separate legacy provider, with no credential forwarding or automatic paid fallback.
+- Add explicit Noul/Choice/Score normalization, complete runtime validation, model discovery, safe HTTP errors and provider-specific trusted credentials. Handle independently rounded score distributions observed in real inference.
+- Add the official TypeSafe host permission, preserving extension identity, existing permissions and local metadata. No new runtime dependency.
+- Complete real authenticated classification, routing, native grouping, Focus, cleanup, review actions, persistence, actual worker stop/recovery, disconnect and offline checks in disposable profiles. Preserve Vercel history and reconcile the combined campaign at 22/25 requests.
+- Add Direct contract, credential-isolation, offline campaign-budget and real-Chrome recovery regressions. Keep existing tests and ordinary Chrome New Tab behavior.
+- Prepare a verified local release candidate for owner manual testing. No store upload or publication.
+
 ## 0.3.0 beta — 6 November 2026
 
 - Add Appearance Studio: seven presets, accessible hue/SV/hex controls, gradients with 2–5 stops, surfaces/blur/grain/shadows, spacing/motion, live preview and explicit persistence, workspace overrides and safe theme import/export.

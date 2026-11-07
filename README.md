@@ -1,8 +1,8 @@
 # Sidekick
 
-A compact, local-first Chrome workspace organizer. **0.3.0 beta** integrates logical tab workspaces, a custom left sidebar, Favorites, Pinned folders, a universal command palette, optional Jev suggestions, reminders, saved sessions, archive portable backups and Appearance Studio.
+A compact, local-first Chrome workspace organizer. **0.4.0 release candidate** integrates logical tab workspaces, a custom left sidebar, Favorites, Pinned folders, a universal command palette, optional Jev suggestions, reminders, saved sessions, archive portable backups and Appearance Studio.
 
-**Status: personal-use beta.** See [current acceptance results](docs/final-polish-results.md), [privacy](docs/privacy.md), [architecture](docs/architecture.md) and [store preparation](docs/release.md). No Chrome Web Store publication has been performed.
+**Status: release candidate for owner manual testing.** See [current acceptance results](docs/typesafe-release-candidate.md), [privacy](docs/privacy.md), [architecture](docs/architecture.md) and [store preparation](docs/release.md). No Chrome Web Store publication has been performed.
 
 ## Install or update
 
@@ -16,7 +16,7 @@ pnpm exec playwright test
 pnpm zip
 ```
 
-At `chrome://extensions`, enable Developer mode and load `.output/chrome-mv3`. On updates, Reload the existing Sidekick card, accept Chrome's new permission prompt if shown, and refresh existing website tabs. Keep the folder and extension ID; do not uninstall or clear storage. Package: `.output/sidekick-0.3.0-chrome.zip`.
+At `chrome://extensions`, enable Developer mode and load `.output/chrome-mv3`. On updates, Reload the existing Sidekick card, accept Chrome's new permission prompt if shown, and refresh existing website tabs. Keep the folder and extension ID; do not uninstall or clear storage. Package: `.output/sidekick-0.4.0-chrome.zip`.
 
 Chrome's original New Tab is preserved. Open the dashboard from **Settings → Open Sidekick dashboard**. The toolbar button opens Chrome's native panel on restricted pages. Secure AI settings open in a dedicated extension tab.
 
@@ -63,13 +63,15 @@ Open Settings → Appearance Studio to choose seven presets or edit base/accent/
 
 ## Optional Jev
 
-Open secure AI settings, enter your Vercel AI Gateway key and Verify & Connect. Verification makes a small potentially billable request; analysis runs when you ask. Disconnect removes the key and clears the in-memory cache. Keys stay in trusted extension storage and never appear in website/sidebar snapshots, exports or logs.
+Open secure AI settings, select **TypeSafe Direct · jev-latest**, enter your TypeSafe key and choose Verify & Connect. Verification discovers permitted models and sends a small Noul request. Keys stay in trusted extension storage and never appear in website/sidebar snapshots, backups or logs. Disconnect removes the selected key. Existing Gateway credentials are preserved separately as a legacy provider; no implicit paid fallback exists.
 
-Jev (`typesafe-ai/jev`, `POST https://ai-gateway.vercel.sh/v1/evaluate`) evaluates selected titles/domains, workspace names and your Focus goal. Paths, queries, fragments and page contents are not sent. Titles/goals can themselves contain sensitive information; choose carefully. Provider retention/billing follow their terms.
+Direct Jev uses `POST https://api.typesafe.ai/v1/systemone`. The adapter converts Noul, Choice and Score into existing Sidekick decisions and validates complete IDs, distributions, confidence, rubric/score consistency, model and usage. It handles the independently rounded numeric values observed from real `jev-1.14.0` responses. [TypeSafe setup and contract](docs/typesafe-direct.md).
+
+Jev evaluates selected sanitized titles/domains, workspace names and your Focus goal. Paths, queries, fragments and page contents are not sent. Titles/goals can themselves contain private information; provider retention/billing follow their terms.
 
 Review categories, routes, related groups, Focus relevance and cleanup before accepting. Categories persist by URL. Routing changes actual membership; grouping creates native Chrome groups without pinning ordinary tabs. Focus preferences are workspace-specific; raw hidden IDs stay session-only. Show All/Exit Focus remains available. Cleanup requires explicit confirmation and archives URL copies first, which cannot restore unsaved forms/history.
 
-**Live inference is blocked by Gateway authentication.** The authorized local-key smoke test stopped after one rejected connection request; no inference followed. See the [feature-by-feature live report](docs/jev-live-verification.md). Deterministic Chrome tests cover HTTP contracts and accepted state changes separately. `pnpm test:live` performs no request unless `SIDEKICK_LIVE=1`; its durable 25-request campaign remains halted after authorization failure.
+**TypeSafe Direct live verification passed for all five features.** The combined historical audit is 22/25 requests. Mocked negative and regression tests are identified separately in [the results](docs/typesafe-release-candidate.md). `pnpm test:live` performs no request unless explicitly opted in; no automatic paid fallback or retry is used.
 
 ## Library and recovery
 
@@ -84,6 +86,6 @@ Docking cannot universally reflow arbitrary websites or change viewport/media qu
 
 Tests use disposable Chrome profiles and deterministic fixtures. Ordinary tests run headless; fullscreen/recovery run headed. `pnpm check` covers types, lint, formatting, unit tests and production build. A scoped pnpm override patches the development-only minimatch advisory without adding runtime dependencies.
 
-[Current checklist](docs/final-polish-checklist.md) · [Current results](docs/final-polish-results.md) · [Historical implementation ledger](docs/master-build.md) · [Architecture](docs/architecture.md) · [Testing](docs/testing.md) · [Release](docs/release.md) · [Changelog](CHANGELOG.md)
+[Current results](docs/typesafe-release-candidate.md) · [Historical 0.3 checklist](docs/final-polish-checklist.md) · [Historical implementation ledger](docs/master-build.md) · [Architecture](docs/architecture.md) · [Testing](docs/testing.md) · [Release](docs/release.md) · [Changelog](CHANGELOG.md)
 
-Gateway authentication follow-up: the updated local key received **HTTP 403** on its single authorized retry. Campaign halted at **2/25**; all five live Jev workflows remain blocked. [Current diagnosis and safe resume](docs/jev-authentication-followup.md).
+Historical Vercel campaign: its two rejected attempts remain preserved and halted. TypeSafe Direct authentication and all five live workflows have now passed. The conservative combined audit is **22/25 requests**, including 20 Direct requests. See [current live results](docs/typesafe-release-candidate.md) and the [historical Gateway diagnosis](docs/jev-authentication-followup.md).

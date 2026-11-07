@@ -1,0 +1,119 @@
+{
+  "date": "2026-11-07",
+  "provider": "TypeSafe Direct",
+  "requestedModel": "jev-latest",
+  "resolvedModel": "jev-1.14.0",
+  "status": "PASS",
+  "features": {
+    "connection": {
+      "status": "PASS",
+      "live": true,
+      "valid": true,
+      "ui": true,
+      "actions": true,
+      "persisted": true,
+      "restart": true
+    },
+    "classification": {
+      "status": "PASS",
+      "live": true,
+      "valid": true,
+      "ui": true,
+      "actions": true,
+      "persisted": true,
+      "restart": true,
+      "edited": true
+    },
+    "routing": {
+      "status": "PASS",
+      "live": true,
+      "valid": true,
+      "ui": true,
+      "actions": true,
+      "persisted": true,
+      "restart": true
+    },
+    "grouping": {
+      "status": "PASS",
+      "live": true,
+      "valid": true,
+      "ui": true,
+      "actions": true,
+      "persisted": true,
+      "restart": true,
+      "rejected": true
+    },
+    "focus": {
+      "status": "PASS",
+      "live": true,
+      "valid": true,
+      "ui": true,
+      "actions": true,
+      "persisted": true,
+      "restart": true
+    },
+    "cleanup": {
+      "status": "PASS",
+      "live": true,
+      "valid": true,
+      "ui": true,
+      "actions": true,
+      "persisted": true,
+      "restart": true,
+      "recovery": true
+    }
+  },
+  "campaign": {
+    "directRequests": 20,
+    "modelDiscoveryGets": 4,
+    "inferencePosts": 16,
+    "meteredDirectRequests": 19,
+    "observedRecoveryBatch": 1,
+    "historicalVercelRequests": 2,
+    "total": 22,
+    "maximum": 25,
+    "remaining": 3
+  },
+  "usage": {
+    "inputTokensKnown": 38551,
+    "outputTokensKnown": 16424,
+    "recoveryUsageUnavailable": true,
+    "currencyCostUnavailable": true
+  },
+  "outcomeCounts": {
+    "classification": {
+      "Development": 1,
+      "Documentation": 6,
+      "Research": 1,
+      "Entertainment": 1,
+      "Shopping": 2,
+      "Communication": 1,
+      "Productivity": 2
+    },
+    "grouping": {
+      "React development": 5,
+      "none": 1,
+      "Entertainment": 1,
+      "Shopping": 2,
+      "Email": 1,
+      "Project management": 2,
+      "Documentation": 2
+    },
+    "cleanup": {
+      "keep": 5,
+      "duplicate": 8,
+      "low-value": 1
+    }
+  },
+  "security": {
+    "noCredentialInSnapshot": true,
+    "noCredentialInBackup": true,
+    "disconnectRemovedKey": true
+  },
+  "browser": {
+    "independentWindows": true,
+    "crossWorkspaceCleanupSafe": true,
+    "offline": true
+  },
+  "audit": "One missed post-restart interception reconciled from a fresh validated UI result. Original metered report retained locally; future runner reserves the one bounded batch before sending. See the narrative report for limitations."
+}
