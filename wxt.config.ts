@@ -9,7 +9,7 @@ export default defineConfig({
     description:
       'A quieter place for your tabs. Workspaces and a sidebar for Chrome.',
     minimum_chrome_version: '116',
-    version_name: '0.3.0 beta',
+    version_name: '0.4.0 release candidate',
     icons: {
       16: 'icon/16.png',
       32: 'icon/32.png',
@@ -25,7 +25,10 @@ export default defineConfig({
       'alarms',
       'tabGroups',
     ],
-    host_permissions: ['https://ai-gateway.vercel.sh/*'],
+    host_permissions: [
+      'https://api.typesafe.ai/*',
+      'https://ai-gateway.vercel.sh/*',
+    ],
     optional_permissions: ['notifications'],
     commands: {
       'next-workspace': { description: 'Next Sidekick workspace' },

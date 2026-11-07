@@ -22,7 +22,8 @@ import {
 import { readBookmarks } from '../lib/bookmarks';
 import { isRestrictedUrl } from '../lib/tabs';
 import { ResourceService } from '../lib/resource-service';
-import { aiService } from '../lib/ai-service';
+import { AiService, aiService } from '../lib/ai-service';
+import { aiKey, aiProvider } from '../lib/ai-settings';
 import { WorkspaceEngine } from '../lib/workspaces';
 import type { AiSettings } from '../lib/models';
 
@@ -86,9 +87,12 @@ export default defineBackground(() => {
       'connected' in value &&
       'status' in value
     ) {
-      return value as AiSettings;
+      return {
+        ...value,
+        provider: aiProvider(value as AiSettings),
+      } as AiSettings;
     }
-    return { connected: false, status: 'disconnected' };
+    return { provider: 'typesafe', connected: false, status: 'disconnected' };
   }
   async function setAiSettings(
     patch: Partial<AiSettings>,
@@ -97,11 +101,6 @@ export default defineBackground(() => {
     const next = { ...current, ...patch };
     await chrome.storage.local.set({ [AI_SETTINGS_KEY]: next });
     return next;
-  }
-  async function verifyAiKey(
-    key: string,
-  ): Promise<{ ok: boolean; error?: string }> {
-    return aiService.verifyConnection(key);
   }
   async function refresh() {
     dirty = true;
@@ -142,6 +141,8 @@ export default defineBackground(() => {
                     ...metadata,
                     activeWorkspaceId: workspaceId,
                     aiSettings: {
+                      provider: aiProvider(aiSettings),
+                      lastModel: aiSettings.lastModel,
                       connected: aiSettings.connected,
                       status: aiSettings.status,
                       lastError: aiSettings.lastError,
@@ -478,37 +479,63 @@ export default defineBackground(() => {
                 )
               )
                 throw Error(
-                  'Open trusted Sidekick settings to configure the Gateway key.',
+                  'Open trusted Sidekick settings to configure the AI provider key.',
                 );
-              const key = c.patch.gatewayKey?.trim() ?? '';
+              const provider =
+                c.patch.provider ??
+                (c.patch.gatewayKey !== undefined ? 'vercel' : 'typesafe');
+              const field =
+                provider === 'typesafe' ? 'typesafeKey' : 'gatewayKey';
+              const key = c.patch[field]?.trim() ?? '';
               if (!key) {
                 await setAiSettings({
-                  gatewayKey: undefined,
+                  provider,
+                  [field]: undefined,
                   connected: false,
                   status: 'disconnected',
                   lastError: undefined,
+                  lastModel: undefined,
                 });
-                aiService.setGatewayKey(undefined);
+                aiService.configure(provider, undefined);
               } else {
-                const result = await verifyAiKey(key);
+                if (
+                  (provider === 'typesafe' && key.startsWith('vck_')) ||
+                  (provider === 'vercel' && !key.startsWith('vck_'))
+                ) {
+                  await setAiSettings({
+                    provider,
+                    connected: false,
+                    status: 'error',
+                    lastError: 'This key belongs to a different AI provider.',
+                  });
+                  aiService.configure(provider, undefined);
+                  throw Error('This key belongs to a different AI provider.');
+                }
+                const verifier = new AiService();
+                const result = await verifier.verifyConnection(key, provider);
                 if (!result.ok) {
                   await setAiSettings({
-                    gatewayKey: undefined,
+                    provider,
+                    [field]: undefined,
                     connected: false,
                     status: 'error',
                     lastError: result.error,
+                    lastModel: undefined,
                   });
-                  aiService.setGatewayKey(undefined);
-                  throw Error(result.error ?? 'Gateway verification failed.');
+                  aiService.configure(provider, undefined);
+                  throw Error(result.error ?? 'AI verification failed.');
                 }
                 await setAiSettings({
-                  gatewayKey: key,
+                  provider,
+                  [field]: key,
                   connected: true,
                   status: 'connected',
                   lastError: undefined,
+                  lastModel:
+                    verifier.lastEvaluation?.model ?? 'typesafe-ai/jev',
                   lastVerified: new Date().toISOString(),
                 });
-                aiService.setGatewayKey(key);
+                aiService.configure(provider, key);
               }
               break;
             }
@@ -518,7 +545,7 @@ export default defineBackground(() => {
             case 'ai.focus':
             case 'ai.cleanup': {
               const settings = await getAiSettings();
-              aiService.setGatewayKey(settings.gatewayKey);
+              aiService.configure(aiProvider(settings), aiKey(settings));
               const { tabs, workspaceId } =
                 await workspaceEngine.snapshot(windowId);
               if (c.tabIds.some((id) => !tabs.some((t) => t.id === id)))
@@ -535,11 +562,12 @@ export default defineBackground(() => {
                 check(await workspaceEngine.snapshot(windowId));
                 const currentSettings = await getAiSettings();
                 if (
-                  currentSettings.gatewayKey !== settings.gatewayKey ||
+                  aiKey(currentSettings) !== aiKey(settings) ||
+                  aiProvider(currentSettings) !== aiProvider(settings) ||
                   !currentSettings.connected
                 )
                   throw Error(
-                    'Gateway connection changed. Review settings before evaluating again.',
+                    'AI provider connection changed. Review settings before evaluating again.',
                   );
                 return result;
               };

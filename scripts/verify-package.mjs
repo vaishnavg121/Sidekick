@@ -13,14 +13,17 @@ assert(
 const manifest = JSON.parse(
   await readFile(resolve(extension, 'manifest.json'), 'utf8'),
 );
-assert.equal(manifest.version, '0.3.0');
+assert.equal(manifest.version, '0.4.0');
 assert.equal(manifest.manifest_version, 3);
 assert.equal(manifest.chrome_url_overrides, undefined);
 assert.deepEqual(
   [...manifest.permissions].sort(),
   ['alarms', 'bookmarks', 'sidePanel', 'storage', 'tabGroups', 'tabs'].sort(),
 );
-assert.deepEqual(manifest.host_permissions, ['https://ai-gateway.vercel.sh/*']);
+assert.deepEqual(manifest.host_permissions, [
+  'https://api.typesafe.ai/*',
+  'https://ai-gateway.vercel.sh/*',
+]);
 for (const file of [
   manifest.background.service_worker,
   manifest.side_panel.default_path,

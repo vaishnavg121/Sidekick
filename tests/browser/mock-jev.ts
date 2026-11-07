@@ -10,6 +10,7 @@ export async function mockJev(
   extensionId: string,
   answer: (body: DecisionRequest) => Promise<object> | object,
   targetId?: string,
+  urlPattern = 'https://ai-gateway.vercel.sh/*',
 ) {
   const cdp = await context.browser()!.newBrowserCDPSession();
   const { targetInfos } = await cdp.send('Target.getTargets');
@@ -42,7 +43,7 @@ export async function mockJev(
     if (event.method !== 'Fetch.requestPaused') return;
     count++;
     const request = event.params;
-    const result = await answer(JSON.parse(request.request.postData));
+    const result = await answer(JSON.parse(request.request.postData ?? '{}'));
     await cdp
       .send('Target.sendMessageToTarget', {
         sessionId,
@@ -66,7 +67,7 @@ export async function mockJev(
     message: JSON.stringify({
       id: 1,
       method: 'Fetch.enable',
-      params: { patterns: [{ urlPattern: 'https://ai-gateway.vercel.sh/*' }] },
+      params: { patterns: [{ urlPattern }] },
     }),
   });
   await ready;

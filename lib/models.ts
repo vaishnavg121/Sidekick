@@ -89,7 +89,11 @@ export interface SecretProvider {
   getGatewayKey(): Promise<string | undefined>;
   clearGatewayKey(): Promise<void>;
 }
+export type AiProvider = 'typesafe' | 'vercel';
 export interface AiSettings {
+  provider?: AiProvider;
+  typesafeKey?: string;
+  lastModel?: string;
   gatewayKey?: string;
   connected: boolean;
   status: 'disconnected' | 'connecting' | 'connected' | 'error';

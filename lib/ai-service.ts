@@ -13,81 +13,18 @@ import type { TabItem } from './tabs';
 const JEV_GATEWAY_URL = 'https://ai-gateway.vercel.sh/v1/evaluate';
 const JEV_MODEL = 'typesafe-ai/jev';
 
-// Request/Response types matching Vercel AI Gateway /v1/evaluate API
-interface JevEvaluateRequest {
-  model: string;
-  state: string;
-  questions: Record<string, JevQuestion>;
-  providerOptions?: {
-    gateway?: {
-      zeroDataRetention?: boolean;
-      only?: string[];
-      models?: Array<{
-        model: string;
-        when?: {
-          question: string;
-          confidenceBelow?: number;
-          probabilityInside?: [number, number];
-        };
-      }>;
-    };
-  };
-}
-
-interface JevEvaluateResponse {
-  model: string;
-  answers: Record<string, JevAnswer>;
-  usage?: {
-    inputTokens: number;
-    outputTokens: number;
-  };
-  providerMetadata?: {
-    gateway?: {
-      routing?: {
-        originalModelId: string;
-        resolvedProvider: string;
-        canonicalSlug: string;
-        finalProvider: string;
-      };
-      cost?: string;
-      marketCost?: string;
-      surchargeCost?: string;
-      gatewayCost?: string;
-      generationId?: string;
-    };
-  };
-}
-
-type JevQuestionType = 'boolean' | 'choice' | 'score';
-
-interface JevQuestionBase {
-  type: JevQuestionType;
-  instructions: string;
-}
-
-interface JevBooleanQuestion extends JevQuestionBase {
-  type: 'boolean';
-  criteria?: {
-    true: string;
-    false: string;
-  };
-}
-
-interface JevChoiceQuestion extends JevQuestionBase {
-  type: 'choice';
-  criteria: Record<string, string>;
-}
-
-interface JevScoreQuestion extends JevQuestionBase {
-  type: 'score';
-  criteria: string[]; // at least 2 labels, ordered lowest to highest
-}
-
-type JevQuestion = JevBooleanQuestion | JevChoiceQuestion | JevScoreQuestion;
-
-interface JevAnswer {
-  type: 'boolean' | 'choice' | 'score';
-}
+import type {
+  JevEvaluateRequest,
+  JevEvaluateResponse,
+  JevQuestion,
+} from './decision-types';
+import {
+  directRequest,
+  normalizeDirectResponse,
+  discoverDirectModels,
+  type EvaluationInfo,
+} from './typesafe-provider';
+import type { AiProvider } from './models';
 
 const DEFAULT_CATEGORIES = [
   'Development',
@@ -207,6 +144,20 @@ export function sanitizeAiText(text: string): string {
 
 export class AiService {
   private gatewayKey: string | undefined;
+  private provider: AiProvider = 'typesafe';
+  private evaluation?: EvaluationInfo;
+  get lastEvaluation() {
+    return this.evaluation;
+  }
+  configure(provider: AiProvider, key?: string) {
+    if (this.provider !== provider || this.gatewayKey !== key) {
+      this.clearCache();
+      this.generation++;
+      this.evaluation = undefined;
+    }
+    this.provider = provider;
+    this.gatewayKey = key;
+  }
   private generation = 0;
   private cache = new Map<string, { result: unknown; timestamp: number }>();
   private readonly CACHE_TTL = 1000 * 60 * 30; // 30 minutes
@@ -215,17 +166,16 @@ export class AiService {
   private queue: Array<() => Promise<unknown>> = [];
 
   setGatewayKey(key: string | undefined) {
-    if (this.gatewayKey !== key) {
-      this.clearCache();
-      this.generation++;
-    }
-    this.gatewayKey = key;
+    this.configure('vercel', key);
   }
 
   async verifyConnection(
     key: string,
+    provider: AiProvider = this.provider,
   ): Promise<{ ok: boolean; error?: string }> {
     try {
+      this.configure(provider, key);
+      if (provider === 'typesafe') await discoverDirectModels(key);
       const response = await this.callJev(
         {
           model: JEV_MODEL,
@@ -264,16 +214,24 @@ export class AiService {
     key?: string,
   ): Promise<JevEvaluateResponse> {
     const apiKey = key ?? this.gatewayKey;
-    if (!apiKey) throw new Error('No Vercel AI Gateway key configured');
+    if (!apiKey) throw new Error('No AI provider key configured');
+    const provider = this.provider;
+    const direct = provider === 'typesafe';
+    if (direct && apiKey.startsWith('vck_'))
+      throw Error('A Vercel key cannot be used with TypeSafe Direct.');
+    if (!direct && !apiKey.startsWith('vck_'))
+      throw Error(
+        'Use a Vercel Gateway key only with the legacy Vercel provider.',
+      );
 
     const response = await this.enqueue(() =>
-      fetch(JEV_GATEWAY_URL, {
+      fetch(direct ? 'https://api.typesafe.ai/v1/systemone' : JEV_GATEWAY_URL, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
           Authorization: `Bearer ${apiKey}`,
         },
-        body: JSON.stringify(request),
+        body: JSON.stringify(direct ? directRequest(request) : request),
         signal: AbortSignal.timeout(20000),
         credentials: 'omit',
         redirect: 'error',
@@ -286,17 +244,26 @@ export class AiService {
 
     if (!response.ok) {
       throw new Error(
-        response.status === 401 || response.status === 403
-          ? 'Jev authorization failed. Check the Gateway key.'
-          : response.status === 429
-            ? 'Jev rate limit or quota reached. Try again later.'
-            : `Jev request failed (HTTP ${response.status}).`,
+        response.status === 401
+          ? 'Jev authentication failed (HTTP 401). Check the selected provider key.'
+          : response.status === 403
+            ? 'Jev access denied (HTTP 403). Check provider/model authorization.'
+            : response.status === 402
+              ? 'Jev balance or payment required (HTTP 402).'
+              : response.status === 429
+                ? 'Jev rate limit or quota reached. Try again later.'
+                : `Jev request failed (HTTP ${response.status}).`,
       );
     }
 
-    const data = (await response.json().catch(() => {
+    const raw = (await response.json().catch(() => {
       throw Error('Jev returned malformed JSON. No changes were applied.');
-    })) as JevEvaluateResponse;
+    })) as unknown;
+    const normalized = direct
+      ? normalizeDirectResponse(raw, request)
+      : undefined;
+    const data = (normalized?.response ?? raw) as JevEvaluateResponse;
+    if (normalized) this.evaluation = normalized.info;
 
     if (
       !data ||

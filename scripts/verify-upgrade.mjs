@@ -7,11 +7,10 @@ import assert from 'node:assert/strict';
 import { URL } from 'node:url';
 const extension = resolve(process.argv[2] ?? '');
 assert(extension.startsWith(resolve('playwright-report') + sep));
-assert.equal(
-  JSON.parse(await readFile(resolve(extension, 'manifest.json'), 'utf8'))
-    .version,
-  '0.2.0',
-);
+const fromVersion = JSON.parse(
+  await readFile(resolve(extension, 'manifest.json'), 'utf8'),
+).version;
+assert(['0.2.0', '0.3.0'].includes(fromVersion));
 const profile = await mkdtemp(resolve(tmpdir(), 'sidekick-upgrade-'));
 let context;
 async function launch() {
@@ -116,6 +115,15 @@ try {
     dueAt: Date.now() + 86400000,
     close: false,
   });
+  await first.worker.evaluate(() =>
+    chrome.storage.local.set({
+      'sidekick.ai.v1': {
+        gatewayKey: 'vck_dormant_upgrade_fixture',
+        connected: true,
+        status: 'connected',
+      },
+    }),
+  );
   const before = await metadata();
   assert(before.library.sessions[0].pages.length > 0);
   await context.close();
@@ -144,12 +152,22 @@ try {
   assert.equal(
     JSON.parse(await readFile(resolve(extension, 'manifest.json'), 'utf8'))
       .version,
-    '0.3.0',
+    '0.4.0',
   );
+  const legacyAi = await second.worker.evaluate(
+    async () =>
+      (await chrome.storage.local.get('sidekick.ai.v1'))['sidekick.ai.v1'],
+  );
+  assert.deepEqual(legacyAi, {
+    gatewayKey: 'vck_dormant_upgrade_fixture',
+    connected: true,
+    status: 'connected',
+  });
   const report = {
+    legacyAiCredentialPreserved: true,
     status: 'PASS',
-    from: '0.2.0',
-    to: '0.3.0',
+    from: fromVersion,
+    to: '0.4.0',
     sameUnpackedPathAndId: true,
     workspaces: true,
     favorites: true,

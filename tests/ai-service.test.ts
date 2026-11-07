@@ -94,7 +94,7 @@ describe('AiService - per-tab classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
 
     const results: TabClassification[] = await service.classifyTabs(tabs);
 
@@ -120,7 +120,7 @@ describe('AiService - per-tab classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs();
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow(
@@ -143,7 +143,7 @@ describe('AiService - per-tab classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs();
 
     const existingClassifications = {
@@ -177,7 +177,7 @@ describe('AiService - per-tab classification', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     // First call with default categories
@@ -254,7 +254,7 @@ describe('AiService - per-tab workspace routing', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs();
 
     const results: WorkspaceRecommendation[] = await service.routeTabs(
@@ -295,7 +295,7 @@ describe('AiService - per-tab workspace routing', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs();
 
     const results: WorkspaceRecommendation[] = await service.routeTabs(
@@ -337,7 +337,7 @@ describe('AiService - per-tab workspace routing', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     // First call
@@ -391,7 +391,7 @@ describe('AiService - per-tab focus relevance', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs();
 
     const results: FocusRelevance[] = await service.scoreFocus(
@@ -436,7 +436,7 @@ describe('AiService - per-tab focus relevance', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.scoreFocus(tabs, 'test goal')).rejects.toThrow(
@@ -457,7 +457,7 @@ describe('AiService - per-tab focus relevance', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await service.scoreFocus(tabs, 'C++ project');
@@ -534,7 +534,7 @@ describe('AiService - semantic grouping', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
 
     const results: RelatedTabGroup[] = await service.groupTabs(tabs);
 
@@ -562,7 +562,7 @@ describe('AiService - semantic grouping', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const results: RelatedTabGroup[] = await service.groupTabs(tabs);
 
     // No groups with 2+ tabs sharing the same topic (and none/Other excluded)
@@ -586,7 +586,7 @@ describe('AiService - semantic grouping', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const results: RelatedTabGroup[] = await service.groupTabs(tabs);
 
     // No groups with 2+ tabs sharing the same topic
@@ -632,7 +632,7 @@ describe('AiService - safe cleanup', () => {
     ];
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
 
     // Mock Jev to return keep for all
     const fetchMock = vi.fn().mockImplementation(async () => ({
@@ -694,7 +694,7 @@ describe('AiService - safe cleanup', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const results: CleanupSuggestion[] = await service.suggestCleanup(tabs);
 
     // Different query params = different URLs = not exact duplicates
@@ -718,7 +718,7 @@ describe('AiService - safe cleanup', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const results: CleanupSuggestion[] = await service.suggestCleanup(tabs);
 
     // Only stale tab should be suggested for cleanup
@@ -744,7 +744,7 @@ describe('AiService - safe cleanup', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     await expect(service.suggestCleanup(tabs)).rejects.toThrow(
       'invalid cleanup',
     );
@@ -784,7 +784,7 @@ describe('AiService - cache invalidation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     // First call
@@ -812,7 +812,7 @@ describe('AiService - cache invalidation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     // First call with default categories
@@ -839,7 +839,7 @@ describe('AiService - cache invalidation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     // First call without overrides
@@ -872,7 +872,7 @@ describe('AiService - contract validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow(
@@ -888,7 +888,7 @@ describe('AiService - contract validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow(
@@ -901,7 +901,7 @@ describe('AiService - contract validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow('timed out');
@@ -920,7 +920,7 @@ describe('AiService - contract validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow(
@@ -941,7 +941,7 @@ describe('AiService - contract validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.classifyTabs(tabs)).rejects.toThrow(
@@ -967,7 +967,7 @@ describe('AiService - contract validation', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     const tabs = createMockTabs().slice(0, 1);
 
     await expect(service.scoreFocus(tabs, 'test goal')).rejects.toThrow(
@@ -1012,7 +1012,7 @@ describe('AiService - input sanitization and security', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     await service.classifyTabs(tabs);
   });
 
@@ -1050,7 +1050,7 @@ describe('AiService - input sanitization and security', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     await service.classifyTabs(tabs);
   });
 
@@ -1075,7 +1075,7 @@ describe('AiService - input sanitization and security', () => {
     vi.stubGlobal('fetch', fetchMock);
 
     const service = new AiService();
-    service.setGatewayKey('test-key');
+    service.setGatewayKey('vck_test-key');
     expect(await service.classifyTabs(tabs)).toEqual([]);
     expect(fetchMock).not.toHaveBeenCalled();
   });
